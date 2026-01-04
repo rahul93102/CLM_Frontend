@@ -1,0 +1,421 @@
+{
+    "collection_name": "CLM",
+    "collection_id": "50102363-cc4fa017-9880-420d-981f-3f59f4999e7b",
+    "base_url": "https://clm-backend-y5ta.onrender.com",
+    "total_endpoints": 12,
+    "endpoints": [
+        {
+            "name": "Signup/Register",
+            "method": "POST",
+            "url": "https://clm-backend-y5ta.onrender.com/api/auth/register/",
+            "description": "Register a new user account",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": {
+                "mode": "raw",
+                "content_type": "application/json",
+                "sample_data": {
+                    "email": "test123@example.com",
+                    "password": "testpass1234",
+                    "first_name": "Test",
+                    "last_name": "User"
+                }
+            },
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 201,
+                    "status_text": "Created",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "POST, OPTIONS"
+                    },
+                    "body": {
+                        "message": "User created successfully",
+                        "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "user": {
+                            "user_id": "6981296d-9e17-4295-93f2-5e3c7112833a",
+                            "email": "test123@example.com",
+                            "first_name": "",
+                            "last_name": "",
+                            "tenant_id": "f037d67b-7974-43f6-9994-4cf1de52421a",
+                            "is_staff": false
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Login",
+            "method": "POST",
+            "url": "https://clm-backend-y5ta.onrender.com/api/auth/login/",
+            "description": "Authenticate user and receive access tokens",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": {
+                "mode": "raw",
+                "content_type": "application/json",
+                "sample_data": {
+                    "email": "testuser@example.com",
+                    "password": "testpass123"
+                }
+            },
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "POST, OPTIONS"
+                    },
+                    "body": {
+                        "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "user": {
+                            "user_id": "cddb430e-e085-4fb9-bbfd-76e7f8644d61",
+                            "email": "testuser@example.com",
+                            "first_name": "",
+                            "last_name": "",
+                            "tenant_id": "4e8aff70-1758-479d-878a-bb2e123ef3bf",
+                            "is_staff": false
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Refresh Token",
+            "method": "POST",
+            "url": "https://clm-backend-y5ta.onrender.com/api/auth/token/refresh/",
+            "description": "Refresh access token using refresh token",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": {
+                "mode": "raw",
+                "content_type": "application/json",
+                "sample_data": {
+                    "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                }
+            },
+            "response_examples": [
+                {
+                    "name": "Post data Copy 2",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "POST, OPTIONS"
+                    },
+                    "body": {
+                        "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Templates",
+            "method": "GET",
+            "url": "https://clm-backend-y5ta.onrender.com/api/contract-templates/",
+            "description": "Get list of contract templates",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": null,
+            "response_examples": [
+                {
+                    "name": "Find User Id",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "GET, HEAD, OPTIONS"
+                    },
+                    "body": {
+                        "count": 0,
+                        "next": null,
+                        "previous": null,
+                        "results": []
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Clauses",
+            "method": "GET",
+            "url": "https://clm-backend-y5ta.onrender.com/api/clauses/",
+            "description": "Get list of contract clauses",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": null,
+            "response_examples": [
+                {
+                    "name": "Templates Copy",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "GET, HEAD, OPTIONS"
+                    },
+                    "body": {
+                        "count": 0,
+                        "next": null,
+                        "previous": null,
+                        "results": []
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Contracts",
+            "method": "GET",
+            "url": "https://clm-backend-y5ta.onrender.com/api/generation-jobs/",
+            "description": "Get list of contract generation jobs",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": null,
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "GET, HEAD, OPTIONS"
+                    },
+                    "body": {
+                        "count": 0,
+                        "next": null,
+                        "previous": null,
+                        "results": []
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Statistics",
+            "method": "GET",
+            "url": "https://clm-backend-y5ta.onrender.com/api/contracts/statistics/",
+            "description": "Get contract statistics and monthly trends",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": null,
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "GET, HEAD, OPTIONS"
+                    },
+                    "body": {
+                        "total": 0,
+                        "draft": 0,
+                        "pending": 0,
+                        "approved": 0,
+                        "rejected": 0,
+                        "executed": 0,
+                        "monthly_trends": [
+                            {
+                                "month": "Aug",
+                                "approved": 0,
+                                "rejected": 0
+                            },
+                            {
+                                "month": "Sep",
+                                "approved": 0,
+                                "rejected": 0
+                            },
+                            {
+                                "month": "Oct",
+                                "approved": 0,
+                                "rejected": 0
+                            },
+                            {
+                                "month": "Nov",
+                                "approved": 0,
+                                "rejected": 0
+                            },
+                            {
+                                "month": "Dec",
+                                "approved": 0,
+                                "rejected": 0
+                            },
+                            {
+                                "month": "Jan",
+                                "approved": 0,
+                                "rejected": 0
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Recent Contracts",
+            "method": "GET",
+            "url": "https://clm-backend-y5ta.onrender.com/api/contracts/recent/",
+            "description": "Get list of recent contracts",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": null,
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "GET, HEAD, OPTIONS"
+                    },
+                    "body": []
+                }
+            ]
+        },
+        {
+            "name": "ValidateClause",
+            "method": "POST",
+            "url": "https://clm-backend-y5ta.onrender.com/api/contracts/validate-clauses/",
+            "description": "Validate contract clauses",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": {
+                "mode": "raw",
+                "content_type": "application/json",
+                "sample_data": {
+                    "clauses": []
+                }
+            },
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "POST, OPTIONS"
+                    },
+                    "body": {
+                        "is_valid": true,
+                        "errors": [],
+                        "warnings": [],
+                        "mandatory_clauses": []
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Features Apis",
+            "method": "GET",
+            "url": "https://clm-backend-y5ta.onrender.com/api/",
+            "description": "Get list of available API endpoints",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": null,
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "GET, HEAD, OPTIONS"
+                    },
+                    "body": {
+                        "contract-templates": "https://clm-backend-y5ta.onrender.com/api/contract-templates/",
+                        "clauses": "https://clm-backend-y5ta.onrender.com/api/clauses/",
+                        "contracts": "https://clm-backend-y5ta.onrender.com/api/contracts/",
+                        "generation-jobs": "https://clm-backend-y5ta.onrender.com/api/generation-jobs/"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Forget Password",
+            "method": "POST",
+            "url": "https://clm-backend-y5ta.onrender.com/api/auth/forgot-password/",
+            "description": "Request password reset link",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": {
+                "mode": "raw",
+                "content_type": "application/json",
+                "sample_data": {
+                    "email": "testuser@example.com"
+                }
+            },
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 200,
+                    "status_text": "OK",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "POST, OPTIONS"
+                    },
+                    "body": {
+                        "message": "If the email exists, a password reset link has been sent",
+                        "reset_token": "OZsx_lmswZYk_Xtu0G_I2JtqnRZEih8iWGCyMr4VOLU",
+                        "reset_link": "http://localhost:3000/#reset?token=OZsx_lmswZYk_Xtu0G_I2JtqnRZEih8iWGCyMr4VOLU"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Reset Password",
+            "method": "POST",
+            "url": "https://clm-backend-y5ta.onrender.com/api/auth/reset-password/",
+            "description": "Reset user password using reset token",
+            "headers": [],
+            "query_parameters": [],
+            "path_variables": [],
+            "request_body": null,
+            "response_examples": [
+                {
+                    "name": "New Request",
+                    "status_code": 401,
+                    "status_text": "Unauthorized",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "allow": "POST, OPTIONS",
+                        "www-authenticate": "Bearer realm=\"api\""
+                    },
+                    "body": {
+                        "detail": "Given token not valid for any token type",
+                        "code": "token_not_valid",
+                        "messages": [
+                            {
+                                "token_class": "AccessToken",
+                                "token_type": "access",
+                                "message": "Token is invalid or expired"
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    ],
+    "authentication": {
+        "type": "JWT Bearer Token",
+        "description": "Most endpoints require JWT authentication. Use the Login endpoint to obtain access and refresh tokens. Include the access token in the Authorization header as 'Bearer <token>'."
+    },
+    "notes": [
+        "All endpoints use JSON for request and response bodies",
+        "The API is hosted at https://clm-backend-y5ta.onrender.com",
+        "Pagination is supported on list endpoints with 'count', 'next', and 'previous' fields",
+        "Token refresh is available via the Refresh Token endpoint"
+    ]
+}
