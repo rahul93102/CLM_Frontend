@@ -61,8 +61,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     setSuccess(null);
     
     try {
-      await authAPI.forgotPassword(email);
-      setSuccess('Password reset link has been sent to your email!');
+      const result = await authAPI.forgotPassword(email);
+      setSuccess(result.reset_link ? `Reset link: ${result.reset_link}` : 'Password reset link has been sent to your email!');
       setEmail('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to send reset link');

@@ -1,13 +1,13 @@
 {
     "collection_name": "CLM",
     "collection_id": "50102363-cc4fa017-9880-420d-981f-3f59f4999e7b",
-    "base_url": "https://clm-backend-y5ta.onrender.com",
+    "base_url": "http://13.48.148.79/",
     "total_endpoints": 12,
     "endpoints": [
         {
             "name": "Signup/Register",
             "method": "POST",
-            "url": "https://clm-backend-y5ta.onrender.com/api/auth/register/",
+            "url": "http://13.48.148.79//api/auth/register/",
             "description": "Register a new user account",
             "headers": [],
             "query_parameters": [],
@@ -50,7 +50,7 @@
         {
             "name": "Login",
             "method": "POST",
-            "url": "https://clm-backend-y5ta.onrender.com/api/auth/login/",
+            "url": "http://13.48.148.79//api/auth/login/",
             "description": "Authenticate user and receive access tokens",
             "headers": [],
             "query_parameters": [],
@@ -90,7 +90,7 @@
         {
             "name": "Refresh Token",
             "method": "POST",
-            "url": "https://clm-backend-y5ta.onrender.com/api/auth/token/refresh/",
+            "url": "http://13.48.148.79//api/auth/token/refresh/",
             "description": "Refresh access token using refresh token",
             "headers": [],
             "query_parameters": [],
@@ -121,7 +121,7 @@
         {
             "name": "Templates",
             "method": "GET",
-            "url": "https://clm-backend-y5ta.onrender.com/api/contract-templates/",
+            "url": "http://13.48.148.79//api/contract-templates/",
             "description": "Get list of contract templates",
             "headers": [],
             "query_parameters": [],
@@ -148,7 +148,7 @@
         {
             "name": "Clauses",
             "method": "GET",
-            "url": "https://clm-backend-y5ta.onrender.com/api/clauses/",
+            "url": "http://13.48.148.79//api/clauses/",
             "description": "Get list of contract clauses",
             "headers": [],
             "query_parameters": [],
@@ -175,7 +175,7 @@
         {
             "name": "Get Contracts",
             "method": "GET",
-            "url": "https://clm-backend-y5ta.onrender.com/api/generation-jobs/",
+            "url": "http://13.48.148.79//api/generation-jobs/",
             "description": "Get list of contract generation jobs",
             "headers": [],
             "query_parameters": [],
@@ -202,7 +202,7 @@
         {
             "name": "Statistics",
             "method": "GET",
-            "url": "https://clm-backend-y5ta.onrender.com/api/contracts/statistics/",
+            "url": "http://13.48.148.79//api/contracts/statistics/",
             "description": "Get contract statistics and monthly trends",
             "headers": [],
             "query_parameters": [],
@@ -263,7 +263,7 @@
         {
             "name": "Recent Contracts",
             "method": "GET",
-            "url": "https://clm-backend-y5ta.onrender.com/api/contracts/recent/",
+            "url": "http://13.48.148.79//api/contracts/recent/",
             "description": "Get list of recent contracts",
             "headers": [],
             "query_parameters": [],
@@ -285,7 +285,7 @@
         {
             "name": "ValidateClause",
             "method": "POST",
-            "url": "https://clm-backend-y5ta.onrender.com/api/contracts/validate-clauses/",
+            "url": "http://13.48.148.79//api/contracts/validate-clauses/",
             "description": "Validate contract clauses",
             "headers": [],
             "query_parameters": [],
@@ -318,7 +318,7 @@
         {
             "name": "Features Apis",
             "method": "GET",
-            "url": "https://clm-backend-y5ta.onrender.com/api/",
+            "url": "http://13.48.148.79//api/",
             "description": "Get list of available API endpoints",
             "headers": [],
             "query_parameters": [],
@@ -334,10 +334,10 @@
                         "allow": "GET, HEAD, OPTIONS"
                     },
                     "body": {
-                        "contract-templates": "https://clm-backend-y5ta.onrender.com/api/contract-templates/",
-                        "clauses": "https://clm-backend-y5ta.onrender.com/api/clauses/",
-                        "contracts": "https://clm-backend-y5ta.onrender.com/api/contracts/",
-                        "generation-jobs": "https://clm-backend-y5ta.onrender.com/api/generation-jobs/"
+                        "contract-templates": "http://13.48.148.79//api/contract-templates/",
+                        "clauses": "http://13.48.148.79//api/clauses/",
+                        "contracts": "http://13.48.148.79//api/contracts/",
+                        "generation-jobs": "http://13.48.148.79//api/generation-jobs/"
                     }
                 }
             ]
@@ -345,7 +345,7 @@
         {
             "name": "Forget Password",
             "method": "POST",
-            "url": "https://clm-backend-y5ta.onrender.com/api/auth/forgot-password/",
+            "url": "http://13.48.148.79//api/auth/forgot-password/",
             "description": "Request password reset link",
             "headers": [],
             "query_parameters": [],
@@ -377,7 +377,7 @@
         {
             "name": "Reset Password",
             "method": "POST",
-            "url": "https://clm-backend-y5ta.onrender.com/api/auth/reset-password/",
+            "url": "http://13.48.148.79//api/auth/reset-password/",
             "description": "Reset user password using reset token",
             "headers": [],
             "query_parameters": [],
@@ -414,7 +414,7 @@
     },
     "notes": [
         "All endpoints use JSON for request and response bodies",
-        "The API is hosted at https://clm-backend-y5ta.onrender.com",
+        "The API is hosted at http://13.48.148.79/",
         "Pagination is supported on list endpoints with 'count', 'next', and 'previous' fields",
         "Token refresh is available via the Refresh Token endpoint"
     ]

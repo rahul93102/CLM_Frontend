@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
 
 // Type definitions
@@ -26,6 +27,7 @@ interface Contract {
 }
 
 const Dashboard = () => {
+  const router = useRouter();
   const [stats, setStats] = useState<Statistics | null>(null);
   const [recentContracts, setRecentContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,31 +52,7 @@ const Dashboard = () => {
       const token = getToken();
       
       if (!token) {
-        // Mock data for demonstration when not authenticated
-        setStats({
-          total: 2847,
-          draft: 156,
-          pending: 89,
-          approved: 2301,
-          rejected: 301,
-          monthly_trends: [
-            { month: 'Jan', approved: 145 },
-            { month: 'Feb', approved: 189 },
-            { month: 'Mar', approved: 234 },
-            { month: 'Apr', approved: 198 },
-            { month: 'May', approved: 267 },
-            { month: 'Jun', approved: 312 },
-          ]
-        });
-        
-        setRecentContracts([
-          { id: '1', title: 'Vendor Agreement - TechCorp Solutions', status: 'Approved', created_at: '2026-01-03' },
-          { id: '2', title: 'Service Level Agreement Q1 2026', status: 'Draft', created_at: '2026-01-03' },
-          { id: '3', title: 'Partnership MOU - Global Enterprises', status: 'Pending', created_at: '2026-01-02' },
-          { id: '4', title: 'Non-Disclosure Agreement', status: 'Approved', created_at: '2026-01-02' },
-          { id: '5', title: 'Master Service Agreement Renewal', status: 'Pending', created_at: '2026-01-01' },
-        ]);
-        
+        setError('Authentication required');
         setLoading(false);
         return;
       }
@@ -163,7 +141,10 @@ const Dashboard = () => {
             </button>
             
             {/* New Contract Button */}
-            <button className="bg-[#0F141F] text-white px-6 py-3 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2">
+            <button
+              onClick={() => router.push('/create-contract')}
+              className="bg-[#0F141F] text-white px-6 py-3 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2"
+            >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>

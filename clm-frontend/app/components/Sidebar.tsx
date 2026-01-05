@@ -64,6 +64,15 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
       ), 
       active: false 
     },
+    { 
+      name: 'Templates', 
+      icon: (
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h16v16H4z" />
+        </svg>
+      ), 
+      active: false 
+    },
   ];
 
   return (
@@ -96,6 +105,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                 ? 'text-white bg-white/10' 
                 : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
             } ${isExpanded ? 'px-4 py-3' : 'px-0 py-3 flex justify-center'}`}
+            onClick={() => {
+              if (item.name === 'Dashboard') window.location.href = '/';
+              if (item.name === 'Templates') window.location.href = '/templates';
+              // Add more navigation as needed
+            }}
           >
             {item.active && !isExpanded && (
               <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-1 h-8 bg-gradient-to-b from-[#FF7E5F] to-[#FEB47B] rounded-r-full"></div>
