@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { templateAPI, clauseAPI, jobAPI, tokenManager } from '../lib/api';
+import { useAuth } from '../lib/auth-context';
+import { ApiClient } from '../lib/api-client';
 
 // Types
 interface Template {
@@ -19,6 +20,7 @@ interface Clause {
 
 const CreateContract = () => {
   const router = useRouter();
+  const { user } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [clauses, setClauses] = useState<Clause[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
@@ -28,20 +30,23 @@ const CreateContract = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (user) {
+      fetchData();
+    }
+  }, [user]);
 
   const fetchData = async () => {
     try {
-      const [templatesData, clausesData] = await Promise.all([
-        templateAPI.getTemplates(),
-        clauseAPI.getClauses(),
+      const client = new ApiClient();
+      const [templatesResponse, contractsResponse] = await Promise.all([
+        client.getTemplates(),
+        client.getContracts(),
       ]);
-      setTemplates(templatesData.results || []);
-      setClauses(clausesData.results || []);
+      setTemplates(templatesResponse?.data || []);
+      setClauses(contractsResponse?.data || []);
     } catch (err) {
       console.error('Failed to fetch data:', err);
-      setError('Failed to load templates and clauses');
+      setError('Failed to load templates');
     }
   };
 
@@ -64,27 +69,12 @@ const CreateContract = () => {
     setError(null);
 
     try {
-      // Assuming POST to generation-jobs to create contract
-      const response = await fetch('http://13.48.148.79//api/generation-jobs/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${tokenManager.getAccessToken()}`,
-        },
-        body: JSON.stringify({
-          template_id: selectedTemplate,
-          clause_ids: selectedClauses,
-          contract_title: contractTitle,
-        }),
+      const client = new ApiClient();
+      await client.createContract({
+        title: contractTitle,
+        description: selectedTemplate ? `Created from template: ${selectedTemplate}` : '',
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to create contract');
-      }
-
-      const result = await response.json();
-      // Redirect to dashboard or contract details
-      router.push('/');
+      router.push('/dashboard');
     } catch (err) {
       console.error('Failed to create contract:', err);
       setError(err instanceof Error ? err.message : 'Failed to create contract');

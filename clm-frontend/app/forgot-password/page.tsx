@@ -3,48 +3,45 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { useAuth } from '@/app/lib/auth-context'
+import { requestPasswordReset } from '@/app/lib/api'
 
-export default function LoginPage() {
+export default function ForgotPasswordPage() {
   const router = useRouter()
-  const { login, isLoading, error, clearError, isAuthenticated } = useAuth()
 
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [localError, setLocalError] = useState('')
-  const [rememberMe, setRememberMe] = useState(false)
-
-  // Redirect if already authenticated
-  useEffect(() => {
-    if (isAuthenticated) {
-      router.push('/dashboard')
-    }
-  }, [isAuthenticated, router])
-
-  // Clear error on unmount
-  useEffect(() => {
-    return () => {
-      clearError()
-    }
-  }, [clearError])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLocalError('')
+    setError('')
 
-    if (!email || !password) {
-      setLocalError('Please enter your email and password')
+    // Validation
+    if (!email) {
+      setError('Please enter your email address')
       return
     }
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Please enter a valid email address')
+      return
+    }
+
+    setIsLoading(true)
+
     try {
-      await login(email, password)
-    } catch (err) {
-      setLocalError(error || 'Login failed. Please try again.')
+      await requestPasswordReset(email)
+      setSuccess(true)
+      setTimeout(() => {
+        router.push(`/verify-otp?type=password-reset&email=${encodeURIComponent(email)}`)
+      }, 1500)
+    } catch (err: any) {
+      setError(err?.message || 'Failed to send reset code. Please try again.')
+    } finally {
+      setIsLoading(false)
     }
   }
-
-  const displayError = localError || error
 
   return (
     <div className="flex h-screen bg-white">
@@ -80,20 +77,31 @@ export default function LoginPage() {
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-purple-600 to-pink-500">
               <span className="text-white font-bold text-2xl">C</span>
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 mt-4">Welcome Back</h1>
-            <p className="text-gray-600 mt-2">Sign in to access your dashboard</p>
           </div>
 
-          {/* Desktop Heading */}
-          <div className="hidden lg:block mb-8">
-            <h2 className="text-4xl font-bold text-gray-900 mb-2">Welcome Back</h2>
-            <p className="text-gray-600">Sign in to access your dashboard</p>
+          {/* Heading */}
+          <div className="mb-8">
+            <h2 className="text-4xl font-bold text-gray-900 mb-2">
+              Reset Password
+            </h2>
+            <p className="text-gray-600">
+              Enter your email address and we'll send you a code to reset your password.
+            </p>
           </div>
+
+          {/* Success Message */}
+          {success && (
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+              <p className="text-sm text-green-600">
+                ✓ Check your email for the verification code!
+              </p>
+            </div>
+          )}
 
           {/* Error Message */}
-          {displayError && (
+          {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
-              <p className="text-sm text-red-600">{displayError}</p>
+              <p className="text-sm text-red-600">{error}</p>
             </div>
           )}
 
@@ -111,67 +119,33 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
-                disabled={isLoading}
+                disabled={isLoading || success}
               />
-            </div>
-
-            {/* Password Input */}
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
-                disabled={isLoading}
-              />
-            </div>
-
-            {/* Remember Me & Forgot Password */}
-            <div className="flex items-center justify-between">
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                />
-                <span className="ml-2 text-sm text-gray-600">Remember me</span>
-              </label>
-              <Link
-                href="/forgot-password"
-                className="text-sm font-medium text-pink-600 hover:text-pink-700 transition"
-              >
-                Forgot password?
-              </Link>
             </div>
 
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || success}
               className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:shadow-lg hover:opacity-95 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              {success
+                ? 'Code Sent ✓'
+                : isLoading
+                  ? 'Sending...'
+                  : 'Send Reset Code'}
             </button>
-
-            {/* Sign Up Link */}
-            <div className="text-center">
-              <p className="text-gray-600 text-sm">
-                Don't have an account?{' '}
-                <Link
-                  href="/register"
-                  className="font-semibold text-pink-600 hover:text-pink-700 transition"
-                >
-                  Sign up
-                </Link>
-              </p>
-            </div>
           </form>
+
+          {/* Back to Login */}
+          <div className="mt-6 text-center">
+            <Link
+              href="/"
+              className="text-sm font-medium text-pink-600 hover:text-pink-700 transition"
+            >
+              Back to login
+            </Link>
+          </div>
 
           {/* Footer */}
           <p className="mt-8 text-center text-xs text-gray-500">
@@ -208,10 +182,3 @@ export default function LoginPage() {
     </div>
   )
 }
-
-
-
-
-
-
-

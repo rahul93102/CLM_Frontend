@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
-import { contractAPI, templateAPI, clauseAPI, jobAPI, tokenManager } from '../lib/api';
+import { ApiClient } from '../lib/api-client';
+import { useAuth } from '../lib/auth-context';
 
 // Type definitions
 interface Statistics {
@@ -55,6 +56,7 @@ interface DashboardProps {
 }
 
 const DashboardContent: React.FC<DashboardProps> = ({ onLogout }) => {
+  const { user } = useAuth();
   const [stats, setStats] = useState<Statistics | null>(null);
   const [recentContracts, setRecentContracts] = useState<Contract[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -62,28 +64,23 @@ const DashboardContent: React.FC<DashboardProps> = ({ onLogout }) => {
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  const user = tokenManager.getUser();
 
   const fetchAllData = async () => {
     setLoading(true);
     setError(null);
     
     try {
+      const client = new ApiClient();
       // Fetch all data in parallel
-      const [statsData, contractsData, templatesData, clausesData, jobsData] = await Promise.all([
-        contractAPI.getStatistics().catch(() => null),
-        contractAPI.getRecentContracts().catch(() => []),
-        templateAPI.getTemplates().catch(() => ({ results: [] })),
-        clauseAPI.getClauses().catch(() => ({ results: [] })),
-        jobAPI.getJobs().catch(() => ({ results: [] })),
+      const [contractsResponse, templatesResponse] = await Promise.all([
+        client.getContracts().catch(() => ({ data: [] })),
+        client.getTemplates().catch(() => ({ data: [] })),
       ]);
 
-      setStats(statsData);
-      setRecentContracts(contractsData);
-      setTemplates(templatesData.results || []);
-      setClauses(clausesData.results || []);
-      setJobs(jobsData.results || []);
+      setRecentContracts(contractsResponse?.data || []);
+      setTemplates(templatesResponse?.data || []);
+      setClauses([]);
+      setJobs([]);
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
@@ -126,7 +123,7 @@ const DashboardContent: React.FC<DashboardProps> = ({ onLogout }) => {
           <div>
             <h1 className="text-4xl font-bold text-[#2D3748]">Dashboard Overview</h1>
             <p className="text-gray-500 mt-1">
-              Welcome back, {user?.first_name || user?.email || 'User'}! Here&apos;s your contract status.
+              Welcome back, {user?.full_name || user?.email || 'User'}! Here&apos;s your contract status.
             </p>
           </div>
           <div className="flex items-center gap-4">
