@@ -1,9 +1,12 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { Editor } from '@tiptap/react';
 import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from './DashboardLayout';
+import RichTextEditor from './RichTextEditor';
 import { ApiClient, Contract } from '@/app/lib/api-client';
+import { sanitizeEditorHtml } from '@/app/lib/sanitize-html';
 
 type ClauseCard = {
   id: string;
@@ -24,8 +27,11 @@ const ContractEditorPageV2: React.FC = () => {
   const [clauseSearch, setClauseSearch] = useState('');
   const [clauseLimit, setClauseLimit] = useState(50);
 
-  const editorRef = useRef<HTMLDivElement | null>(null);
+  const editorApiRef = useRef<Editor | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const [editorHtml, setEditorHtml] = useState('');
+  const [editorText, setEditorText] = useState('');
+  const streamThrottleRef = useRef(0);
   const [dirty, setDirty] = useState(false);
   const [editTick, setEditTick] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -49,8 +55,13 @@ const ContractEditorPageV2: React.FC = () => {
 
   const textToHtml = (text: string) => {
     const safe = escapeHtml(text || '');
-    // Use <br/> to preserve newlines in contentEditable.
-    return safe.replace(/\n/g, '<br/>');
+    // Preserve newlines. Split on double newlines into paragraphs.
+    const paras = safe
+      .split(/\n{2,}/)
+      .map((p) => p.replace(/\n/g, '<br/>'))
+      .filter((p) => p.trim().length > 0);
+
+    return paras.length ? paras.map((p) => `<p>${p}</p>`).join('') : '<p></p>';
   };
 
   const triggerDownload = (blob: Blob, filename: string) => {
@@ -77,7 +88,9 @@ const ContractEditorPageV2: React.FC = () => {
         if (!alive) return;
 
         if (res.success) {
-          setContract(res.data as any);
+          const raw: any = res.data as any;
+          const unwrapped: any = raw?.contract ?? raw?.data?.contract ?? raw?.data ?? raw;
+          setContract(unwrapped as any);
         } else {
           setError(res.error || 'Failed to load contract');
         }
@@ -102,12 +115,12 @@ const ContractEditorPageV2: React.FC = () => {
     const renderedText: string = c?.rendered_text || c?.metadata?.rendered_text || '';
     const initialHtml = renderedHtml && String(renderedHtml).trim().length > 0 ? String(renderedHtml) : textToHtml(renderedText);
 
-    if (editorRef.current) {
-      editorRef.current.innerHTML = initialHtml || '';
-      setEditorReady(true);
-      setDirty(false);
-      setSaveError(null);
-    }
+    setEditorHtml(initialHtml || '');
+    setEditorText(renderedText || '');
+    editorApiRef.current?.commands.setContent(initialHtml || '', { emitUpdate: false });
+    setEditorReady(true);
+    setDirty(false);
+    setSaveError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractId, (contract as any)?.id]);
 
@@ -140,18 +153,13 @@ const ContractEditorPageV2: React.FC = () => {
   const title = (contract as any)?.title || (contract as any)?.name || 'Contract';
   const updatedAt = (contract as any)?.updated_at ? new Date((contract as any).updated_at).toLocaleString() : null;
 
-  const exec = (command: string) => {
-    if (!editorRef.current) return;
-    editorRef.current.focus();
-    document.execCommand(command, false);
-    setDirty(true);
-    setEditTick((t) => t + 1);
-  };
-
   const saveNow = async () => {
-    if (!contractId || !editorRef.current) return;
-    const html = editorRef.current.innerHTML;
-    const text = editorRef.current.innerText;
+    if (!contractId) return;
+    const rawHtml = editorApiRef.current?.getHTML() ?? editorHtml;
+    const rawText = editorApiRef.current?.getText() ?? editorText;
+
+    const html = sanitizeEditorHtml(rawHtml);
+    const text = String(rawText || '');
 
     try {
       setSaving(true);
@@ -188,7 +196,6 @@ const ContractEditorPageV2: React.FC = () => {
 
   const runAi = async () => {
     if (!contractId) return;
-    if (!editorRef.current) return;
     const prompt = aiPrompt.trim();
     if (!prompt) return;
 
@@ -202,23 +209,29 @@ const ContractEditorPageV2: React.FC = () => {
 
     try {
       const client = new ApiClient();
-      const currentText = editorRef.current.innerText || '';
+      const currentText = editorApiRef.current?.getText() ?? editorText;
       await client.streamContractAiGenerate(
         contractId,
         {
           prompt,
-          current_text: currentText,
+          current_text: String(currentText || ''),
         },
         {
           signal: abort.signal,
           onDelta: (delta) => {
             aiTextRef.current += delta;
-            if (!editorRef.current) return;
+            if (!editorApiRef.current) return;
+            const now = Date.now();
+            if (now - streamThrottleRef.current < 50) return;
+            streamThrottleRef.current = now;
+            const nextHtml = textToHtml(aiTextRef.current);
             if (!aiStartedRef.current) {
               aiStartedRef.current = true;
-              editorRef.current.innerHTML = '';
+              editorApiRef.current.commands.setContent('', { emitUpdate: false });
             }
-            editorRef.current.innerHTML = textToHtml(aiTextRef.current);
+            editorApiRef.current.commands.setContent(nextHtml, { emitUpdate: false });
+            setEditorHtml(nextHtml);
+            setEditorText(aiTextRef.current);
           },
           onError: (err) => {
             setAiError(err || 'AI generation failed');
@@ -279,6 +292,18 @@ const ContractEditorPageV2: React.FC = () => {
       return hay.includes(q);
     });
   }, [clauses, clauseSearch]);
+
+  const insertClauseIntoEditor = (clause: ClauseCard) => {
+    const ed = editorApiRef.current;
+    if (!ed) return;
+
+    const header = clause.name ? `<p><strong>${escapeHtml(String(clause.name))}</strong></p>` : '';
+    const body = clause.content ? textToHtml(String(clause.content)) : '';
+    const payload = `${header}${body}<p></p>`;
+    ed.chain().focus().insertContent(payload).run();
+    setDirty(true);
+    setEditTick((t) => t + 1);
+  };
 
   useEffect(() => {
     // Reset pagination when searching.
@@ -349,8 +374,21 @@ const ContractEditorPageV2: React.FC = () => {
               ) : (
                 filteredClauses.slice(0, clauseLimit).map((c) => (
                   <div key={c.id} className="rounded-2xl border border-black/5 bg-[#F6F3ED] p-4">
-                    <p className="text-[10px] tracking-wider font-bold text-[#FF5C7A]">{c.clause_id || 'CLAUSE'}</p>
-                    <p className="text-sm font-semibold text-[#111827] mt-1">{c.name || 'Untitled clause'}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] tracking-wider font-bold text-[#FF5C7A]">{c.clause_id || 'CLAUSE'}</p>
+                        <p className="text-sm font-semibold text-[#111827] mt-1 truncate">{c.name || 'Untitled clause'}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => insertClauseIntoEditor(c)}
+                        className="h-9 px-3 rounded-full bg-white border border-black/10 text-sm font-semibold text-[#0F141F] hover:bg-black/5"
+                        aria-label="Insert clause into editor"
+                        title="Insert into editor"
+                      >
+                        + Add
+                      </button>
+                    </div>
                     {c.content && <p className="text-xs text-black/45 mt-2 leading-relaxed line-clamp-3">{c.content}</p>}
                   </div>
                 ))
@@ -377,29 +415,7 @@ const ContractEditorPageV2: React.FC = () => {
           {/* Editor */}
           <section className="col-span-12 lg:col-span-6 bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
             <div className="px-6 pt-5 pb-4 border-b border-black/5 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-black/45">
-                {['B', 'I', 'U'].map((x) => (
-                  <button
-                    key={x}
-                    onClick={() => exec(x === 'B' ? 'bold' : x === 'I' ? 'italic' : 'underline')}
-                    className="w-9 h-9 rounded-xl hover:bg-black/5 text-sm font-semibold"
-                    aria-label={x}
-                    type="button"
-                  >
-                    {x}
-                  </button>
-                ))}
-                <button
-                  onClick={() => exec('insertUnorderedList')}
-                  className="w-9 h-9 rounded-xl hover:bg-black/5"
-                  aria-label="Bullets"
-                  type="button"
-                >
-                  <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-                  </svg>
-                </button>
-              </div>
+              <div className="text-sm font-semibold text-[#111827]">Editor</div>
               <div className="flex items-center gap-2 relative">
                 <button
                   onClick={downloadPdf}
@@ -456,21 +472,26 @@ const ContractEditorPageV2: React.FC = () => {
               </div>
             </div>
 
-            <div className="px-10 py-10 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+            <div className="px-6 py-6 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
               {loading ? (
                 <div className="text-sm text-black/45">Loading contract…</div>
               ) : !contract ? (
                 <div className="text-sm text-black/45">No contract found.</div>
               ) : (
-                <div
-                  ref={editorRef}
-                  contentEditable={!aiGenerating}
-                  suppressContentEditableWarning
-                  onInput={() => {
+                <RichTextEditor
+                  valueHtml={editorHtml}
+                  disabled={aiGenerating}
+                  onEditorReady={(ed) => {
+                    editorApiRef.current = ed;
+                    setEditorReady(!!ed);
+                  }}
+                  onChange={(html, text) => {
+                    setEditorHtml(html);
+                    setEditorText(text);
                     setDirty(true);
                     setEditTick((t) => t + 1);
                   }}
-                  className={`min-h-[60vh] whitespace-pre-wrap text-[13px] leading-6 text-slate-900 font-serif outline-none ${aiGenerating ? 'opacity-80' : ''}`}
+                  editorClassName={`min-h-[60vh] rounded-2xl border border-black/10 bg-white px-5 py-4 text-[13px] leading-6 text-slate-900 font-serif outline-none ${aiGenerating ? 'opacity-80' : ''}`}
                 />
               )}
             </div>

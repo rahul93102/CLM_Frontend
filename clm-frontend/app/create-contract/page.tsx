@@ -2,6 +2,7 @@
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import type { Editor } from '@tiptap/react';
 import { useAuth } from '../lib/auth-context';
 import {
   ApiClient,
@@ -12,7 +13,9 @@ import {
   TemplateSchemaSection,
 } from '../lib/api-client';
 import DashboardLayout from '../components/DashboardLayout';
+import RichTextEditor from '../components/RichTextEditor';
 import { Bell, ChevronLeft, FileText, Search, Sparkles, Settings2, ZoomIn, ZoomOut } from 'lucide-react';
+import { sanitizeEditorHtml } from '../lib/sanitize-html';
 
 // Types
 type Template = FileTemplateItem;
@@ -104,13 +107,78 @@ const CreateContractInner = () => {
   const [aiTitle, setAiTitle] = useState('');
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiBaseText, setAiBaseText] = useState('');
+  const [aiBaseHtml, setAiBaseHtml] = useState('');
   const [aiSuggestionText, setAiSuggestionText] = useState('');
   const [aiTemplateQuery, setAiTemplateQuery] = useState('');
   const [aiLoadingTemplate, setAiLoadingTemplate] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiDraftUpdatedAt, setAiDraftUpdatedAt] = useState<number | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
-  const aiEditorRef = useRef<HTMLDivElement | null>(null);
+  const aiEditorApiRef = useRef<Editor | null>(null);
+  const aiAutoStartTemplateRef = useRef<string>('');
+
+  type AiDraft = {
+    template: string;
+    title: string;
+    html: string;
+    text: string;
+    updatedAt: number;
+  };
+
+  const userDraftKey = useMemo(() => {
+    const u: any = user as any;
+    return String(u?.user_id || u?.id || u?.email || 'anon');
+  }, [user]);
+
+  const getAiDraftStorageKey = (templateFilename: string) => `clm:aiBuilderDraft:v1:${userDraftKey}:${templateFilename}`;
+
+  const readAiDraft = (templateFilename: string): AiDraft | null => {
+    try {
+      const raw = localStorage.getItem(getAiDraftStorageKey(templateFilename));
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') return null;
+      return {
+        template: String((obj as any).template || templateFilename),
+        title: String((obj as any).title || ''),
+        html: String((obj as any).html || ''),
+        text: String((obj as any).text || ''),
+        updatedAt: Number((obj as any).updatedAt || 0),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const writeAiDraft = (templateFilename: string, draft: AiDraft) => {
+    try {
+      localStorage.setItem(getAiDraftStorageKey(templateFilename), JSON.stringify(draft));
+    } catch {
+      // Ignore storage quota/availability issues.
+    }
+  };
+
+  const clearAiDraft = (templateFilename: string) => {
+    try {
+      localStorage.removeItem(getAiDraftStorageKey(templateFilename));
+    } catch {
+      // Ignore.
+    }
+  };
+
+  const escapeHtml = (s: string) =>
+    (s || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+
+  const textToHtml = (text: string) => {
+    const safe = escapeHtml(text || '');
+    return `<p>${safe.replace(/\n/g, '<br/>')}</p>`;
+  };
 
   useEffect(() => {
     fetchTemplates();
@@ -120,6 +188,11 @@ const CreateContractInner = () => {
   useEffect(() => {
     const filename = searchParams.get('template');
     if (filename) setSelectedTemplate(filename);
+  }, [searchParams]);
+
+  useEffect(() => {
+    const m = (searchParams.get('mode') || searchParams.get('builder') || '').toLowerCase();
+    if (m === 'ai') setMode('ai');
   }, [searchParams]);
 
   useEffect(() => {
@@ -135,8 +208,10 @@ const CreateContractInner = () => {
       setAiTitle('');
       setAiPrompt('');
       setAiBaseText('');
+      setAiBaseHtml('');
       setAiSuggestionText('');
       setAiError(null);
+      setAiDraftUpdatedAt(null);
       return;
     }
 
@@ -197,24 +272,83 @@ const CreateContractInner = () => {
     loadSchemaAndClauses();
   }, [selectedTemplate]);
 
-  // Keep the AI editor DOM in sync with the accepted/base text.
+  useEffect(() => {
+    if (mode !== 'ai') return;
+    if (!selectedTemplate) {
+      setAiDraftUpdatedAt(null);
+      return;
+    }
+    const d = readAiDraft(selectedTemplate);
+    setAiDraftUpdatedAt(d?.updatedAt ? d.updatedAt : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedTemplate, userDraftKey]);
+
+  // Auto-resume saved AI Builder drafts (and optionally auto-start from query params).
+  useEffect(() => {
+    if (mode !== 'ai') return;
+    if (!selectedTemplate) return;
+
+    const draft = readAiDraft(selectedTemplate);
+    if (draft && (draft.html || draft.text)) {
+      setAiError(null);
+      setAiTitle(draft.title || String(selectedTemplateObj?.name || selectedTemplate));
+      setAiBaseText(draft.text || '');
+      setAiBaseHtml(draft.html || textToHtml(draft.text || ''));
+      setAiSuggestionText('');
+      setAiStep('edit');
+      setAiDraftUpdatedAt(draft.updatedAt || Date.now());
+      return;
+    }
+
+    const shouldAutoStart =
+      (searchParams.get('mode') || '').toLowerCase() === 'ai' || (searchParams.get('autostart') || '') === '1';
+    if (!shouldAutoStart) return;
+    if (aiStep !== 'select') return;
+    if (aiAutoStartTemplateRef.current === selectedTemplate) return;
+    aiAutoStartTemplateRef.current = selectedTemplate;
+    // Fire and forget.
+    startAiBuilder();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedTemplate, aiStep, searchParams, userDraftKey]);
+
+  // Auto-save AI Builder editor progress locally (so refresh/redirect resumes).
   useEffect(() => {
     if (mode !== 'ai') return;
     if (aiStep !== 'edit') return;
-    if (!aiEditorRef.current) return;
-    if (!aiBaseText) {
-      aiEditorRef.current.innerText = '';
-      return;
-    }
-    // Only update if it differs to reduce selection jumps.
-    if (aiEditorRef.current.innerText !== aiBaseText) {
-      aiEditorRef.current.innerText = aiBaseText;
-    }
-  }, [aiBaseText, aiStep, mode]);
+    if (!selectedTemplate) return;
+    if (!aiBaseHtml && !aiBaseText) return;
+
+    const t = window.setTimeout(() => {
+      const draft: AiDraft = {
+        template: selectedTemplate,
+        title: String(aiTitle || selectedTemplateObj?.name || selectedTemplate),
+        html: aiBaseHtml,
+        text: aiBaseText,
+        updatedAt: Date.now(),
+      };
+      writeAiDraft(selectedTemplate, draft);
+      setAiDraftUpdatedAt(draft.updatedAt);
+    }, 650);
+
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, aiStep, selectedTemplate, aiTitle, aiBaseHtml, aiBaseText]);
 
   const startAiBuilder = async () => {
     if (!selectedTemplate) return;
     try {
+      const existing = readAiDraft(selectedTemplate);
+      if (existing && (existing.html || existing.text)) {
+        setAiError(null);
+        setAiTitle(existing.title || String(selectedTemplateObj?.name || selectedTemplate));
+        setAiBaseText(existing.text || '');
+        setAiBaseHtml(existing.html || textToHtml(existing.text || ''));
+        setAiSuggestionText('');
+        setAiStep('edit');
+        setAiDraftUpdatedAt(existing.updatedAt || Date.now());
+        return;
+      }
+
       setAiError(null);
       setAiLoadingTemplate(true);
       const client = new ApiClient();
@@ -227,8 +361,19 @@ const CreateContractInner = () => {
       const name = String((res.data as any)?.name || '') || String(selectedTemplate || 'Template');
       setAiTitle(name);
       setAiBaseText(content);
+      setAiBaseHtml(textToHtml(content));
       setAiSuggestionText('');
       setAiStep('edit');
+
+      const draft: AiDraft = {
+        template: selectedTemplate,
+        title: name,
+        html: textToHtml(content),
+        text: content,
+        updatedAt: Date.now(),
+      };
+      writeAiDraft(selectedTemplate, draft);
+      setAiDraftUpdatedAt(draft.updatedAt);
     } catch (e) {
       setAiError(e instanceof Error ? e.message : 'Failed to load template');
     } finally {
@@ -243,7 +388,7 @@ const CreateContractInner = () => {
       setAiError('Please enter a prompt');
       return;
     }
-    const current = aiEditorRef.current?.innerText ?? aiBaseText;
+    const current = aiEditorApiRef.current?.getText() ?? aiBaseText;
     if (!current.trim()) {
       setAiError('Template content is empty');
       return;
@@ -297,6 +442,7 @@ const CreateContractInner = () => {
     const next = (aiSuggestionText || '').trim();
     if (!next) return;
     setAiBaseText(next);
+    setAiBaseHtml(textToHtml(next));
     setAiSuggestionText('');
   };
 
@@ -309,12 +455,15 @@ const CreateContractInner = () => {
       setAiError(null);
       setLoading(true);
       const client = new ApiClient();
-      const renderedText = aiEditorRef.current?.innerText ?? aiBaseText;
+      const renderedText = aiEditorApiRef.current?.getText() ?? aiBaseText;
+      const renderedHtmlRaw = aiEditorApiRef.current?.getHTML() ?? aiBaseHtml;
+      const renderedHtml = sanitizeEditorHtml(renderedHtmlRaw);
       const title = (aiTitle || selectedTemplateObj?.name || 'Contract').trim();
       const res = await client.createContractFromContent({
         title,
         contract_type: schema?.template_type || selectedTemplateObj?.contract_type,
         rendered_text: renderedText,
+        rendered_html: renderedHtml,
       });
       if (!res.success) {
         setAiError(res.error || 'Failed to create draft');
@@ -324,6 +473,11 @@ const CreateContractInner = () => {
       if (!id) {
         setAiError('Draft created but no contract id returned');
         return;
+      }
+
+      if (selectedTemplate) {
+        clearAiDraft(selectedTemplate);
+        setAiDraftUpdatedAt(null);
       }
       router.push(`/contracts/${id}`);
     } catch (e) {
@@ -634,9 +788,15 @@ const CreateContractInner = () => {
                         disabled={!selectedTemplate || aiLoadingTemplate}
                         className="h-11 px-5 rounded-full bg-[#0F141F] text-white text-sm font-semibold disabled:opacity-60"
                       >
-                        {aiLoadingTemplate ? 'Loading…' : 'Get Started'}
+                        {aiLoadingTemplate ? 'Loading…' : aiDraftUpdatedAt ? 'Resume Draft' : 'Get Started'}
                       </button>
                     </div>
+
+                    {aiDraftUpdatedAt ? (
+                      <div className="mt-4 rounded-2xl border border-black/10 bg-[#F6F3ED] px-4 py-3 text-sm text-black/60">
+                        Saved draft found — last updated {new Date(aiDraftUpdatedAt).toLocaleString()}.
+                      </div>
+                    ) : null}
 
                     {aiError ? (
                       <div className="mt-5 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-sm">
@@ -707,15 +867,18 @@ const CreateContractInner = () => {
                         </div>
                       </div>
 
-                      <div className="px-10 py-10 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-                        <div
-                          ref={aiEditorRef}
-                          contentEditable={!aiGenerating}
-                          suppressContentEditableWarning
-                          onInput={() => {
-                            setAiBaseText(aiEditorRef.current?.innerText || '');
+                      <div className="px-6 py-6 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                        <RichTextEditor
+                          valueHtml={aiBaseHtml}
+                          disabled={aiGenerating}
+                          onEditorReady={(ed) => {
+                            aiEditorApiRef.current = ed;
                           }}
-                          className={`min-h-[60vh] whitespace-pre-wrap text-[13px] leading-6 text-slate-900 font-serif outline-none ${
+                          onChange={(html, text) => {
+                            setAiBaseHtml(html);
+                            setAiBaseText(text);
+                          }}
+                          editorClassName={`min-h-[60vh] rounded-2xl border border-black/10 bg-white px-5 py-4 text-[13px] leading-6 text-slate-900 font-serif outline-none ${
                             aiGenerating ? 'opacity-80' : ''
                           }`}
                         />
@@ -903,9 +1066,9 @@ const CreateContractInner = () => {
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <form onSubmit={handleSubmit} className="mt-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
                 {/* Left: Data Entry */}
-                <div className="bg-white rounded-[18px] border border-black/5 shadow-sm overflow-hidden">
+                <div className="bg-white rounded-[18px] border border-black/5 shadow-sm overflow-hidden lg:col-span-5">
                   <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-full bg-[#FF5C7A] text-white flex items-center justify-center text-xs font-bold">1</div>
@@ -1167,7 +1330,7 @@ const CreateContractInner = () => {
                 </div>
 
                 {/* Right: Live Preview */}
-                <div className="bg-white rounded-[18px] border border-black/5 shadow-sm overflow-hidden">
+                <div className="bg-white rounded-[18px] border border-black/5 shadow-sm overflow-hidden lg:col-span-7">
                   <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="text-xs text-[#6B7280] font-semibold">Live Preview</div>
@@ -1192,10 +1355,10 @@ const CreateContractInner = () => {
                     </div>
                   </div>
 
-                  <div className="p-5">
-                    <div className="bg-[#EEF0F3] rounded-[18px] p-4">
+                  <div className="p-4">
+                    <div className="bg-[#EEF0F3] rounded-[18px] p-3">
                       <div className="bg-white rounded-[14px] shadow-sm border border-black/5 overflow-hidden">
-                        <div className="p-6 max-h-[560px] overflow-y-auto" style={{ transform: `scale(${previewZoom})`, transformOrigin: 'top left' }}>
+                        <div className="p-4 max-h-[72vh] overflow-y-auto" style={{ transform: `scale(${previewZoom})`, transformOrigin: 'top left' }}>
                           {previewLoading ? (
                             <div className="text-sm text-[#6B7280]">Generating preview…</div>
                           ) : !selectedTemplate ? (
@@ -1211,7 +1374,7 @@ const CreateContractInner = () => {
                       </div>
                     </div>
 
-                    <div className="mt-5 flex items-center justify-between gap-4">
+                    <div className="mt-4 flex items-center justify-between gap-4">
                       <div className="text-sm text-[#6B7280]">
                         {!user ? 'Please log in to create contracts.' : schema?.template_type ? `Type: ${schema.template_type}` : null}
                       </div>
