@@ -50,6 +50,14 @@ body {
   margin: 0 0 0.75rem 0;
 }
 
+.ProseMirror ul {
+  list-style-type: disc;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+}
+
 .ProseMirror li {
   margin: 0.15rem 0;
 }

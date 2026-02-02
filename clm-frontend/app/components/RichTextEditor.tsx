@@ -38,9 +38,9 @@ import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
-import Image from '@tiptap/extension-image';
 
 import { FontSizeExtension } from './tiptap/FontSizeExtension';
+import { ResizableImageExtension, type ImageAlign } from './tiptap/ResizableImageExtension';
 
 type Props = {
   valueHtml: string;
@@ -128,10 +128,10 @@ export default function RichTextEditor({
       FontSizeExtension,
       Subscript,
       Superscript,
-      Image.configure({
+      ResizableImageExtension.configure({
         allowBase64: true,
         HTMLAttributes: {
-          class: 'max-w-full h-auto rounded-xl border border-black/10',
+          class: 'rounded-xl border border-black/10',
         },
       }),
       Highlight.configure({ multicolor: true }),
@@ -272,7 +272,8 @@ export default function RichTextEditor({
     if (!editor) return;
     const url = src.trim();
     if (!url) return;
-    editor.chain().focus().setImage({ src: url }).run();
+    editor.chain().focus().setImage({ src: url } as any).run();
+    editor.chain().focus().setImageWidth('60%').setImageAlign('center').run();
     setImageOpen(false);
     setImageUrl('');
   };
@@ -292,10 +293,15 @@ export default function RichTextEditor({
       r.readAsDataURL(file);
     });
     if (!dataUrl.startsWith('data:image/')) return;
-    editor.chain().focus().setImage({ src: dataUrl }).run();
+    editor.chain().focus().setImage({ src: dataUrl } as any).run();
+    editor.chain().focus().setImageWidth('60%').setImageAlign('center').run();
     setImageOpen(false);
     setImageUrl('');
   };
+
+  const isImageActive = !!editor?.isActive('image');
+  const currentImageAlign = (editor?.getAttributes('image') as any)?.align as ImageAlign | undefined;
+  const currentImageWidth = (editor?.getAttributes('image') as any)?.width as string | undefined;
 
   return (
     <div className={className}>
@@ -606,6 +612,57 @@ export default function RichTextEditor({
               >
                 <RotateCcw className="w-4 h-4" />
               </ToolbarIconButton>
+
+              {isImageActive ? (
+                <>
+                  <div className={`w-px h-6 ${toolbarIsDark ? 'bg-white/15' : 'bg-black/10'} mx-1`} />
+
+                  <div className={`text-xs font-semibold ${toolbarIsDark ? 'text-white/80' : 'text-black/50'}`}>Image</div>
+
+                  <select
+                    className={`h-9 rounded-full border px-3 text-sm outline-none ${
+                      toolbarIsDark
+                        ? 'border-white/10 bg-transparent text-white'
+                        : 'border-black/10 bg-white text-black/70'
+                    }`}
+                    value={currentImageWidth || '60%'}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!editor) return;
+                      editor.chain().focus().setImageWidth(v === 'auto' ? null : v).run();
+                    }}
+                    disabled={disabledUi}
+                    aria-label="Image size"
+                  >
+                    <option value="25%">25%</option>
+                    <option value="40%">40%</option>
+                    <option value="60%">60%</option>
+                    <option value="80%">80%</option>
+                    <option value="100%">100%</option>
+                    <option value="auto">Auto</option>
+                  </select>
+
+                  <select
+                    className={`h-9 rounded-full border px-3 text-sm outline-none ${
+                      toolbarIsDark
+                        ? 'border-white/10 bg-transparent text-white'
+                        : 'border-black/10 bg-white text-black/70'
+                    }`}
+                    value={currentImageAlign || 'center'}
+                    onChange={(e) => {
+                      const v = e.target.value as ImageAlign;
+                      if (!editor) return;
+                      editor.chain().focus().setImageAlign(v).run();
+                    }}
+                    disabled={disabledUi}
+                    aria-label="Image alignment"
+                  >
+                    <option value="left">Left</option>
+                    <option value="center">Center</option>
+                    <option value="right">Right</option>
+                  </select>
+                </>
+              ) : null}
             </div>
           </div>
         ) : null}

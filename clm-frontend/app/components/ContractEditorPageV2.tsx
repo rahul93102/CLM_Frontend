@@ -15,6 +15,17 @@ type ClauseCard = {
   content?: string;
 };
 
+type GenerationContext = {
+  contractId: string;
+  template: string;
+  fieldValues: Record<string, string>;
+  selectedClauseIds: string[];
+  customClauses: Array<{ title?: string; content: string }>;
+  constraints: Array<{ name: string; value: string }>;
+  updatedAt: number;
+  createdAt: number;
+};
+
 const ContractEditorPageV2: React.FC = () => {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -45,6 +56,10 @@ const ContractEditorPageV2: React.FC = () => {
   const aiTextRef = useRef<string>('');
   const aiStartedRef = useRef<boolean>(false);
 
+  const [generationCtx, setGenerationCtx] = useState<GenerationContext | null>(null);
+  const [rehydrating, setRehydrating] = useState(false);
+  const rehydratedOnceRef = useRef(false);
+
   const escapeHtml = (s: string) =>
     (s || '')
       .replaceAll('&', '&amp;')
@@ -52,6 +67,39 @@ const ContractEditorPageV2: React.FC = () => {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+
+  const normalizeMetadata = (value: unknown) => {
+    let md: any = value;
+    if (typeof md === 'string') {
+      try {
+        md = JSON.parse(md);
+      } catch {
+        md = {};
+      }
+    }
+    return md && typeof md === 'object' ? md : {};
+  };
+
+  const isMeaningfullyEmptyHtml = (html: unknown) => {
+    const raw = String(html || '').trim();
+    if (!raw) return true;
+    // Common TipTap/ProseMirror empty-doc forms.
+    const normalized = raw
+      .replace(/\s+/g, '')
+      .replace(/&nbsp;/g, '')
+      .toLowerCase();
+    const empties = new Set([
+      '<p></p>',
+      '<p><br></p>',
+      '<p><br/></p>',
+      '<p><br/></p><p><br/></p>',
+      '<p></p><p></p>',
+    ]);
+    if (empties.has(normalized)) return true;
+    // If it only contains tags and no text, treat it as empty.
+    const textOnly = normalized.replace(/<[^>]*>/g, '');
+    return textOnly.length === 0;
+  };
 
   const textToHtml = (text: string) => {
     const safe = escapeHtml(text || '');
@@ -108,21 +156,152 @@ const ContractEditorPageV2: React.FC = () => {
     };
   }, [contractId]);
 
+  useEffect(() => {
+    if (!contractId) return;
+    try {
+      const raw = localStorage.getItem(`clm:contractGenerationContext:v1:${contractId}`);
+      if (!raw) {
+        setGenerationCtx(null);
+        return;
+      }
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') {
+        setGenerationCtx(null);
+        return;
+      }
+      setGenerationCtx({
+        contractId: String((obj as any).contractId || contractId),
+        template: String((obj as any).template || ''),
+        fieldValues: ((obj as any).fieldValues || {}) as Record<string, string>,
+        selectedClauseIds: (Array.isArray((obj as any).selectedClauseIds) ? (obj as any).selectedClauseIds : []) as string[],
+        customClauses: (Array.isArray((obj as any).customClauses) ? (obj as any).customClauses : []) as any,
+        constraints: (Array.isArray((obj as any).constraints) ? (obj as any).constraints : []) as any,
+        updatedAt: Number((obj as any).updatedAt || 0),
+        createdAt: Number((obj as any).createdAt || 0),
+      });
+    } catch {
+      setGenerationCtx(null);
+    }
+  }, [contractId]);
+
   // Initialize editor HTML from contract once it loads.
   useEffect(() => {
     const c = contract as any;
-    const renderedHtml: string | undefined = c?.rendered_html || c?.metadata?.rendered_html;
-    const renderedText: string = c?.rendered_text || c?.metadata?.rendered_text || '';
+    const md = normalizeMetadata(c?.metadata);
+
+    const renderedHtml: string | undefined = c?.rendered_html || md?.rendered_html;
+    const renderedText: string =
+      c?.rendered_text ||
+      md?.rendered_text ||
+      // Some endpoints use raw_text (e.g. file-based preview/generation)
+      c?.raw_text ||
+      md?.raw_text ||
+      '';
     const initialHtml = renderedHtml && String(renderedHtml).trim().length > 0 ? String(renderedHtml) : textToHtml(renderedText);
 
     setEditorHtml(initialHtml || '');
     setEditorText(renderedText || '');
-    editorApiRef.current?.commands.setContent(initialHtml || '', { emitUpdate: false });
-    setEditorReady(true);
+    // RichTextEditor syncs valueHtml -> editor content once mounted.
     setDirty(false);
     setSaveError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractId, (contract as any)?.id]);
+
+  // If a contract was created from a filesystem template but has empty content, rehydrate content from template + stored inputs.
+  useEffect(() => {
+    if (!contractId) return;
+    if (loading) return;
+    if (!contract) return;
+    if (rehydratedOnceRef.current) return;
+
+    const c: any = contract as any;
+    const md = normalizeMetadata(c?.metadata);
+
+    const existingHtmlRaw = c?.rendered_html || md?.rendered_html || '';
+    const existingText = String(c?.rendered_text || md?.rendered_text || c?.raw_text || md?.raw_text || '').trim();
+    if (!isMeaningfullyEmptyHtml(existingHtmlRaw) || !!existingText) {
+      rehydratedOnceRef.current = true;
+      return;
+    }
+
+    const templateFilename = String(
+      md?.template_filename ||
+        md?.template ||
+        c?.template_filename ||
+        // Fallback to generator context (localStorage)
+        generationCtx?.template ||
+        ''
+    ).trim();
+    if (!templateFilename) return;
+
+    const structuredInputs =
+      (c?.form_inputs && typeof c.form_inputs === 'object'
+        ? c.form_inputs
+        : md?.form_inputs && typeof md.form_inputs === 'object'
+          ? md.form_inputs
+          : generationCtx?.fieldValues || {}) || {};
+    const clauseList: any[] = Array.isArray(c?.clauses) ? c.clauses : [];
+
+    const selectedClausesFromContract: string[] = clauseList
+      .filter((x) => x && x.kind === 'library' && typeof x.clause_id === 'string')
+      .map((x) => String(x.clause_id));
+    const constraintsFromContract: Array<{ name: string; value: string }> = clauseList
+      .filter((x) => x && x.kind === 'constraint')
+      .map((x) => ({ name: String(x.name || ''), value: String(x.value || '') }))
+      .filter((x) => x.name.trim() && x.value.trim());
+    const customClausesFromContract: Array<{ title?: string; content: string }> = clauseList
+      .filter((x) => x && x.kind === 'custom')
+      .map((x) => ({ title: String(x.title || 'Custom Clause'), content: String(x.content || '') }))
+      .filter((x) => x.content.trim());
+
+    const selectedClauses = Array.from(
+      new Set([
+        ...selectedClausesFromContract,
+        ...(Array.isArray(generationCtx?.selectedClauseIds) ? generationCtx!.selectedClauseIds.map(String) : []),
+      ])
+    );
+    const constraints = (constraintsFromContract.length
+      ? constraintsFromContract
+      : Array.isArray(generationCtx?.constraints)
+        ? generationCtx!.constraints
+        : []) as Array<{ name: string; value: string }>;
+    const customClauses = (customClausesFromContract.length
+      ? customClausesFromContract
+      : Array.isArray(generationCtx?.customClauses)
+        ? generationCtx!.customClauses
+        : []) as Array<{ title?: string; content: string }>;
+
+    (async () => {
+      try {
+        setRehydrating(true);
+        const client = new ApiClient();
+        const res = await client.previewContractFromFile({
+          filename: templateFilename,
+          structuredInputs,
+          selectedClauses,
+          customClauses,
+          constraints,
+        });
+        if (!res.success) return;
+        const nextText = String((res.data as any)?.rendered_text || '').trim();
+        if (!nextText) return;
+
+        const nextHtml = textToHtml(nextText);
+        editorApiRef.current?.commands.setContent(nextHtml, { emitUpdate: false });
+        setEditorHtml(nextHtml);
+        setEditorText(nextText);
+        setDirty(true);
+        setEditTick((t) => t + 1);
+        await saveNow();
+        rehydratedOnceRef.current = true;
+      } catch {
+        // ignore
+      } finally {
+        setRehydrating(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contractId, loading, (contract as any)?.id, generationCtx?.template]);
 
   useEffect(() => {
     let alive = true;
@@ -281,6 +460,27 @@ const ContractEditorPageV2: React.FC = () => {
       triggerDownload(res.data, `${title.replace(/\s+/g, '_')}.txt`);
     } else {
       setError(res.error || 'Failed to download TXT');
+    }
+  };
+
+  const deleteContract = async () => {
+    if (!contractId) return;
+    const ok = window.confirm('Delete this contract? This cannot be undone.');
+    if (!ok) return;
+    try {
+      setSaving(true);
+      setSaveError(null);
+      const client = new ApiClient();
+      const res = await client.deleteContract(contractId);
+      if (!res.success) {
+        setSaveError(res.error || 'Failed to delete contract');
+        return;
+      }
+      router.push('/contracts');
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Failed to delete contract');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -467,6 +667,17 @@ const ContractEditorPageV2: React.FC = () => {
                     >
                       Save now
                     </button>
+                    <div className="h-px bg-black/5" />
+                    <button
+                      onClick={() => {
+                        setMoreOpen(false);
+                        deleteContract();
+                      }}
+                      className="w-full text-left px-4 py-3 text-sm text-rose-600 hover:bg-rose-50"
+                      type="button"
+                    >
+                      Delete contract
+                    </button>
                   </div>
                 )}
               </div>
@@ -477,6 +688,8 @@ const ContractEditorPageV2: React.FC = () => {
                 <div className="text-sm text-black/45">Loading contract…</div>
               ) : !contract ? (
                 <div className="text-sm text-black/45">No contract found.</div>
+              ) : rehydrating ? (
+                <div className="text-sm text-black/45">Restoring template content…</div>
               ) : (
                 <RichTextEditor
                   valueHtml={editorHtml}
@@ -499,6 +712,34 @@ const ContractEditorPageV2: React.FC = () => {
 
           {/* Collaboration */}
           <aside className="col-span-12 lg:col-span-3 space-y-6">
+            {generationCtx?.template ? (
+              <div className="bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
+                <div className="px-6 pt-6 pb-4 border-b border-black/5">
+                  <p className="text-sm font-semibold text-[#111827]">Generation Details</p>
+                  <p className="text-xs text-black/45 mt-1">Carried over from Contract Generator</p>
+                </div>
+                <div className="p-5 space-y-3">
+                  <div className="text-sm">
+                    <div className="text-[11px] text-black/45 font-semibold">Template</div>
+                    <div className="text-sm font-semibold text-[#111827] break-words">{generationCtx.template}</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-black/5 bg-[#F6F3ED] px-4 py-3">
+                      <div className="text-[11px] text-black/45 font-semibold">Selected clauses</div>
+                      <div className="text-lg font-bold text-[#0F141F]">{generationCtx.selectedClauseIds?.length || 0}</div>
+                    </div>
+                    <div className="rounded-2xl border border-black/5 bg-[#F6F3ED] px-4 py-3">
+                      <div className="text-[11px] text-black/45 font-semibold">Constraints</div>
+                      <div className="text-lg font-bold text-[#0F141F]">{generationCtx.constraints?.length || 0}</div>
+                    </div>
+                  </div>
+                  {generationCtx.updatedAt ? (
+                    <div className="text-xs text-black/45">Last saved {new Date(generationCtx.updatedAt).toLocaleString()}</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             <div className="bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
               <div className="px-6 pt-6 pb-4 border-b border-black/5">
                 <p className="text-sm font-semibold text-[#111827]">AI Content Generation</p>

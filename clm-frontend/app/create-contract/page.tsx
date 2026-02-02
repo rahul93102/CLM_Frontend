@@ -27,6 +27,20 @@ type CustomClause = { title?: string; content: string };
 type Constraint = { name: string; value: string };
 type ConstraintTemplate = { key: string; label: string; category?: string; default?: string };
 
+type TemplateDraft = {
+  template: string;
+  fieldValues: Record<string, string>;
+  selectedClauseIds: string[];
+  customClauses: CustomClause[];
+  constraints: Constraint[];
+  updatedAt: number;
+};
+
+type GenerationContext = TemplateDraft & {
+  contractId: string;
+  createdAt: number;
+};
+
 const STANDARD_TEMPLATES_ORDER = [
   'Mutual_NDA.txt',
   'MSA_Master_Services.txt',
@@ -103,6 +117,9 @@ const CreateContractInner = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
 
+  const [templateDraftUpdatedAt, setTemplateDraftUpdatedAt] = useState<number | null>(null);
+  const [templateDraftRestored, setTemplateDraftRestored] = useState(false);
+
   const [aiStep, setAiStep] = useState<AiStep>('select');
   const [aiTitle, setAiTitle] = useState('');
   const [aiPrompt, setAiPrompt] = useState('');
@@ -132,6 +149,54 @@ const CreateContractInner = () => {
   }, [user]);
 
   const getAiDraftStorageKey = (templateFilename: string) => `clm:aiBuilderDraft:v1:${userDraftKey}:${templateFilename}`;
+
+  const getTemplateDraftStorageKey = (templateFilename: string) =>
+    `clm:templateGeneratorDraft:v1:${userDraftKey}:${templateFilename}`;
+
+  const readTemplateDraft = (templateFilename: string): TemplateDraft | null => {
+    try {
+      const raw = localStorage.getItem(getTemplateDraftStorageKey(templateFilename));
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') return null;
+      return {
+        template: String((obj as any).template || templateFilename),
+        fieldValues: ((obj as any).fieldValues || {}) as Record<string, string>,
+        selectedClauseIds: (Array.isArray((obj as any).selectedClauseIds) ? (obj as any).selectedClauseIds : []) as string[],
+        customClauses: (Array.isArray((obj as any).customClauses) ? (obj as any).customClauses : []) as CustomClause[],
+        constraints: (Array.isArray((obj as any).constraints) ? (obj as any).constraints : []) as Constraint[],
+        updatedAt: Number((obj as any).updatedAt || 0),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const writeTemplateDraft = (templateFilename: string, draft: TemplateDraft) => {
+    try {
+      localStorage.setItem(getTemplateDraftStorageKey(templateFilename), JSON.stringify(draft));
+    } catch {
+      // Ignore storage quota/availability issues.
+    }
+  };
+
+  const clearTemplateDraft = (templateFilename: string) => {
+    try {
+      localStorage.removeItem(getTemplateDraftStorageKey(templateFilename));
+    } catch {
+      // Ignore.
+    }
+  };
+
+  const getGenerationContextKey = (contractId: string) => `clm:contractGenerationContext:v1:${contractId}`;
+
+  const writeGenerationContext = (ctx: GenerationContext) => {
+    try {
+      localStorage.setItem(getGenerationContextKey(ctx.contractId), JSON.stringify(ctx));
+    } catch {
+      // Ignore.
+    }
+  };
 
   const readAiDraft = (templateFilename: string): AiDraft | null => {
     try {
@@ -204,6 +269,9 @@ const CreateContractInner = () => {
       setConstraints([]);
       setPreviewText('');
 
+      setTemplateDraftUpdatedAt(null);
+      setTemplateDraftRestored(false);
+
       setAiStep('select');
       setAiTitle('');
       setAiPrompt('');
@@ -271,6 +339,56 @@ const CreateContractInner = () => {
 
     loadSchemaAndClauses();
   }, [selectedTemplate]);
+
+  // Restore template-mode draft when selecting a template (only if current state is empty).
+  useEffect(() => {
+    if (mode !== 'templates') return;
+    if (!user) return;
+    if (!selectedTemplate) return;
+    const empty =
+      Object.keys(fieldValues || {}).length === 0 &&
+      (selectedClauseIds || []).length === 0 &&
+      (customClauses || []).length === 0 &&
+      (constraints || []).length === 0;
+    if (!empty) return;
+
+    const draft = readTemplateDraft(selectedTemplate);
+    if (!draft) {
+      setTemplateDraftUpdatedAt(null);
+      setTemplateDraftRestored(false);
+      return;
+    }
+
+    setFieldValues(draft.fieldValues || {});
+    setSelectedClauseIds(draft.selectedClauseIds || []);
+    setCustomClauses(draft.customClauses || []);
+    setConstraints(draft.constraints || []);
+    setTemplateDraftUpdatedAt(draft.updatedAt || null);
+    setTemplateDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, user, selectedTemplate]);
+
+  // Auto-save template-mode draft locally.
+  useEffect(() => {
+    if (mode !== 'templates') return;
+    if (!user) return;
+    if (!selectedTemplate) return;
+
+    const t = window.setTimeout(() => {
+      const draft: TemplateDraft = {
+        template: selectedTemplate,
+        fieldValues: fieldValues || {},
+        selectedClauseIds: selectedClauseIds || [],
+        customClauses: customClauses || [],
+        constraints: constraints || [],
+        updatedAt: Date.now(),
+      };
+      writeTemplateDraft(selectedTemplate, draft);
+      setTemplateDraftUpdatedAt(draft.updatedAt);
+    }, 350);
+
+    return () => window.clearTimeout(t);
+  }, [mode, user, selectedTemplate, fieldValues, selectedClauseIds, customClauses, constraints]);
 
   useEffect(() => {
     if (mode !== 'ai') return;
@@ -613,6 +731,22 @@ const CreateContractInner = () => {
 
       const contractId = (response.data as any)?.contract?.id;
       if (contractId) {
+        // Persist generation context so the editor can show template/clauses/inputs.
+        writeGenerationContext({
+          contractId: String(contractId),
+          template: selectedTemplate,
+          fieldValues: fieldValues || {},
+          selectedClauseIds: selectedClauseIds || [],
+          customClauses: customClauses || [],
+          constraints: constraints || [],
+          updatedAt: templateDraftUpdatedAt || Date.now(),
+          createdAt: Date.now(),
+        });
+
+        // Clear local draft after successful generation.
+        clearTemplateDraft(selectedTemplate);
+        setTemplateDraftRestored(false);
+        setTemplateDraftUpdatedAt(null);
         router.push(`/contracts/${contractId}`);
       } else {
         router.push('/contracts');
@@ -860,7 +994,7 @@ const CreateContractInner = () => {
                   <div className="grid grid-cols-12 gap-6">
                     {/* Editor */}
                     <section className="col-span-12 lg:col-span-8 bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
-                      <div className="px-6 pt-5 pb-4 border-b border-black/5 flex items-center justify-between">
+                      <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between">
                         <div className="text-sm font-semibold text-[#111827]">Template Editor</div>
                         <div className="text-xs text-black/45">
                           {aiGenerating ? 'Generating suggestion…' : 'Edit content; accept AI suggestions on the right'}
@@ -874,7 +1008,7 @@ const CreateContractInner = () => {
                           onEditorReady={(ed) => {
                             aiEditorApiRef.current = ed;
                           }}
-                          onChange={(html, text) => {
+                          onChange={(html: string, text: string) => {
                             setAiBaseHtml(html);
                             setAiBaseText(text);
                           }}
@@ -1081,12 +1215,40 @@ const CreateContractInner = () => {
                         setSelectedClauseIds([]);
                         setCustomClauses([]);
                         setConstraints([]);
+                        if (selectedTemplate) {
+                          clearTemplateDraft(selectedTemplate);
+                          setTemplateDraftUpdatedAt(null);
+                          setTemplateDraftRestored(false);
+                        }
                       }}
                       className="text-xs text-[#FF5C7A] hover:underline"
                     >
                       Clear all
                     </button>
                   </div>
+
+                  {templateDraftUpdatedAt ? (
+                    <div className="px-5 pt-4">
+                      <div className="rounded-2xl border border-black/10 bg-[#F6F3ED] px-4 py-3 flex items-center justify-between gap-3">
+                        <div className="text-xs text-black/60">
+                          {templateDraftRestored ? 'Draft restored' : 'Auto-saved'} — {new Date(templateDraftUpdatedAt).toLocaleString()}
+                        </div>
+                        {selectedTemplate ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearTemplateDraft(selectedTemplate);
+                              setTemplateDraftUpdatedAt(null);
+                              setTemplateDraftRestored(false);
+                            }}
+                            className="text-xs font-semibold text-[#0F141F] hover:underline"
+                          >
+                            Clear draft
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="p-5 space-y-6">
                     {!selectedTemplate ? (
@@ -1330,7 +1492,7 @@ const CreateContractInner = () => {
                 </div>
 
                 {/* Right: Live Preview */}
-                <div className="bg-white rounded-[18px] border border-black/5 shadow-sm overflow-hidden lg:col-span-7">
+                <div className="bg-white rounded-[18px] border border-black/5 shadow-sm overflow-hidden lg:col-span-7 lg:sticky lg:top-6 self-start">
                   <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="text-xs text-[#6B7280] font-semibold">Live Preview</div>
@@ -1356,17 +1518,25 @@ const CreateContractInner = () => {
                   </div>
 
                   <div className="p-4">
-                    <div className="bg-[#EEF0F3] rounded-[18px] p-3">
+                    <div className="bg-[#EEF0F3] rounded-[18px] p-2 sm:p-3">
                       <div className="bg-white rounded-[14px] shadow-sm border border-black/5 overflow-hidden">
-                        <div className="p-4 max-h-[72vh] overflow-y-auto" style={{ transform: `scale(${previewZoom})`, transformOrigin: 'top left' }}>
+                        <div
+                          className="p-5 sm:p-6 overflow-y-auto"
+                          style={{ height: 'calc(100vh - 320px)' }}
+                        >
                           {previewLoading ? (
                             <div className="text-sm text-[#6B7280]">Generating preview…</div>
                           ) : !selectedTemplate ? (
                             <div className="text-sm text-[#6B7280]">Select a template to preview.</div>
                           ) : previewText ? (
-                            <pre className="whitespace-pre-wrap text-[13px] leading-relaxed text-[#111827] font-serif">
-                              {previewText}
-                            </pre>
+                            <div
+                              className="inline-block min-w-full"
+                              style={({ zoom: previewZoom } as any)}
+                            >
+                              <pre className="whitespace-pre-wrap text-[13px] leading-relaxed text-[#111827] font-serif">
+                                {previewText}
+                              </pre>
+                            </div>
                           ) : (
                             <div className="text-sm text-[#6B7280]">Start filling fields to see a preview.</div>
                           )}
@@ -1383,7 +1553,7 @@ const CreateContractInner = () => {
                         disabled={isCreateDisabled}
                         className="bg-[#0F141F] text-white px-7 py-3.5 rounded-full shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {loading ? 'Creating…' : 'Create Contract'}
+                        {loading ? 'Creating…' : 'Move to editor'}
                       </button>
                     </div>
                   </div>
