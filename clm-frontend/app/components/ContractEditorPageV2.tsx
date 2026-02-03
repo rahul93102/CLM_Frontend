@@ -8,11 +8,16 @@ import RichTextEditor from './RichTextEditor';
 import { ApiClient, Contract } from '@/app/lib/api-client';
 import { sanitizeEditorHtml } from '@/app/lib/sanitize-html';
 
-type ClauseCard = {
-  id: string;
-  clause_id?: string;
-  name?: string;
-  content?: string;
+type TemplateListItem = {
+  filename: string;
+  name: string;
+  description?: string;
+  mine?: boolean;
+};
+
+type SignerDraft = {
+  email: string;
+  name: string;
 };
 
 type GenerationContext = {
@@ -34,31 +39,78 @@ const ContractEditorPageV2: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [contract, setContract] = useState<Contract | null>(null);
-  const [clauses, setClauses] = useState<ClauseCard[]>([]);
-  const [clauseSearch, setClauseSearch] = useState('');
-  const [clauseLimit, setClauseLimit] = useState(50);
+
+  // Templates
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<TemplateListItem[]>([]);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateInsertMode, setTemplateInsertMode] = useState<'replace' | 'cursor'>('replace');
+  const [templateApplying, setTemplateApplying] = useState(false);
 
   const editorApiRef = useRef<Editor | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [editorHtml, setEditorHtml] = useState('');
   const [editorText, setEditorText] = useState('');
-  const streamThrottleRef = useRef(0);
   const [dirty, setDirty] = useState(false);
   const [editTick, setEditTick] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const aiAbortRef = useRef<AbortController | null>(null);
-  const aiTextRef = useRef<string>('');
-  const aiStartedRef = useRef<boolean>(false);
+  // E-sign
+  const [signOpen, setSignOpen] = useState(false);
+  const [signers, setSigners] = useState<SignerDraft[]>([{ email: '', name: '' }]);
+  const [signProvider, setSignProvider] = useState<'firma' | 'signnow'>('firma');
+  const [signingOrder, setSigningOrder] = useState<'sequential' | 'parallel'>('sequential');
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
+  const [signingUrl, setSigningUrl] = useState<string | null>(null);
+  const [signStatusLoading, setSignStatusLoading] = useState(false);
+  const [signStatus, setSignStatus] = useState<any | null>(null);
 
   const [generationCtx, setGenerationCtx] = useState<GenerationContext | null>(null);
   const [rehydrating, setRehydrating] = useState(false);
   const rehydratedOnceRef = useRef(false);
+
+  // Persist Add Template panel UI state across reload/logout.
+  useEffect(() => {
+    if (!contractId) return;
+    if (typeof window === 'undefined') return;
+    const key = `clm:contractEditor:addTemplate:v1:${contractId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') {
+        const search = typeof (obj as any).templateSearch === 'string' ? (obj as any).templateSearch : '';
+        const mode = (obj as any).templateInsertMode === 'cursor' ? 'cursor' : 'replace';
+        setTemplateSearch(search);
+        setTemplateInsertMode(mode);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contractId]);
+
+  useEffect(() => {
+    if (!contractId) return;
+    if (typeof window === 'undefined') return;
+    const key = `clm:contractEditor:addTemplate:v1:${contractId}`;
+    try {
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          templateSearch,
+          templateInsertMode,
+          updatedAt: Date.now(),
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [contractId, templateSearch, templateInsertMode]);
 
   const escapeHtml = (s: string) =>
     (s || '')
@@ -305,25 +357,58 @@ const ContractEditorPageV2: React.FC = () => {
 
   useEffect(() => {
     let alive = true;
-    async function loadClauses() {
+    async function loadTemplates() {
       try {
+        setTemplatesLoading(true);
+        setTemplatesError(null);
         const client = new ApiClient();
-        const res = await client.getClauses();
+
+        const [mineRes, publicRes] = await Promise.all([
+          client.listMyTemplateFiles(),
+          client.listTemplateFiles(),
+        ]);
         if (!alive) return;
-        if (res.success) {
-          const list = Array.isArray(res.data)
-            ? (res.data as any[])
-            : ((res.data as any)?.results || []);
-          setClauses(list);
-        } else {
-          setClauses([]);
+
+        const mine = (mineRes.success ? (mineRes.data as any)?.results : []) || [];
+        const pub = (publicRes.success ? (publicRes.data as any)?.results : []) || [];
+
+        const merged: TemplateListItem[] = [];
+        const seen = new Set<string>();
+
+        for (const x of mine) {
+          const filename = String(x?.filename || '').trim();
+          if (!filename || seen.has(filename)) continue;
+          seen.add(filename);
+          merged.push({
+            filename,
+            name: String(x?.name || x?.filename || 'Untitled'),
+            description: x?.description ? String(x.description) : undefined,
+            mine: true,
+          });
         }
-      } catch {
+
+        for (const x of pub) {
+          const filename = String(x?.filename || '').trim();
+          if (!filename || seen.has(filename)) continue;
+          seen.add(filename);
+          merged.push({
+            filename,
+            name: String(x?.name || x?.filename || 'Untitled'),
+            description: x?.description ? String(x.description) : undefined,
+            mine: false,
+          });
+        }
+
+        setTemplates(merged);
+      } catch (e) {
         if (!alive) return;
-        setClauses([]);
+        setTemplatesError(e instanceof Error ? e.message : 'Failed to load templates');
+      } finally {
+        if (alive) setTemplatesLoading(false);
       }
     }
-    loadClauses();
+
+    loadTemplates();
     return () => {
       alive = false;
     };
@@ -365,80 +450,241 @@ const ContractEditorPageV2: React.FC = () => {
   useEffect(() => {
     if (!editorReady) return;
     if (!dirty) return;
-    if (aiGenerating) return;
     const t = window.setTimeout(() => {
       saveNow();
     }, 900);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editTick, dirty, editorReady, contractId, aiGenerating]);
+  }, [editTick, dirty, editorReady, contractId]);
 
-  const runAi = async () => {
-    if (!contractId) return;
-    const prompt = aiPrompt.trim();
-    if (!prompt) return;
-
-    setAiError(null);
-    setAiGenerating(true);
-    aiTextRef.current = '';
-    aiStartedRef.current = false;
-
-    const abort = new AbortController();
-    aiAbortRef.current = abort;
-
+  const applyTemplateToEditor = async (filename: string) => {
+    const ed = editorApiRef.current;
+    if (!ed) return;
     try {
+      setTemplateApplying(true);
+      setTemplatesError(null);
       const client = new ApiClient();
-      const currentText = editorApiRef.current?.getText() ?? editorText;
-      await client.streamContractAiGenerate(
-        contractId,
-        {
-          prompt,
-          current_text: String(currentText || ''),
-        },
-        {
-          signal: abort.signal,
-          onDelta: (delta) => {
-            aiTextRef.current += delta;
-            if (!editorApiRef.current) return;
-            const now = Date.now();
-            if (now - streamThrottleRef.current < 50) return;
-            streamThrottleRef.current = now;
-            const nextHtml = textToHtml(aiTextRef.current);
-            if (!aiStartedRef.current) {
-              aiStartedRef.current = true;
-              editorApiRef.current.commands.setContent('', { emitUpdate: false });
-            }
-            editorApiRef.current.commands.setContent(nextHtml, { emitUpdate: false });
-            setEditorHtml(nextHtml);
-            setEditorText(aiTextRef.current);
-          },
-          onError: (err) => {
-            setAiError(err || 'AI generation failed');
-          },
-          onDone: () => {
-            // no-op here; we handle after await
-          },
-        }
-      );
+      const res = await client.getTemplateFileContent(filename);
+      if (!res.success) {
+        setTemplatesError(res.error || 'Failed to load template content');
+        return;
+      }
 
-      // Mark dirty and persist once (avoid saving every streamed chunk).
+      const content = String((res.data as any)?.content || '');
+      const nextHtml = textToHtml(content);
+
+      if (templateInsertMode === 'replace') {
+        ed.commands.setContent(nextHtml, { emitUpdate: false });
+        setEditorHtml(nextHtml);
+        setEditorText(content);
+      } else {
+        ed.chain().focus().insertContent(nextHtml).run();
+        setEditorHtml(ed.getHTML());
+        setEditorText(ed.getText());
+      }
+
       setDirty(true);
       setEditTick((t) => t + 1);
       await saveNow();
     } catch (e) {
-      if ((e as any)?.name === 'AbortError') {
-        setAiError('Generation cancelled');
-      } else {
-        setAiError(e instanceof Error ? e.message : 'AI generation failed');
-      }
+      setTemplatesError(e instanceof Error ? e.message : 'Failed to apply template');
     } finally {
-      setAiGenerating(false);
-      aiAbortRef.current = null;
+      setTemplateApplying(false);
     }
   };
 
-  const cancelAi = () => {
-    aiAbortRef.current?.abort();
+
+  const pollAbortRef = useRef<AbortController | null>(null);
+  const pollTimerRef = useRef<number | null>(null);
+  const pollStartedAtRef = useRef<number>(0);
+  const pollDelayRef = useRef<number>(2000);
+
+  const [liveStatus, setLiveStatus] = useState(false);
+  const [polling, setPolling] = useState(false);
+  const [pollError, setPollError] = useState<string | null>(null);
+
+  const stopLiveStatus = () => {
+    try {
+      pollAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    pollAbortRef.current = null;
+    if (pollTimerRef.current) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setPolling(false);
+    setLiveStatus(false);
+  };
+
+  const openSignNow = () => {
+    setSignError(null);
+    setSigningUrl(null);
+    setSignStatus(null);
+    setPollError(null);
+    setLiveStatus(false);
+    setSignOpen(true);
+  };
+
+  useEffect(() => {
+    if (!signOpen) {
+      stopLiveStatus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signOpen]);
+
+  const validateSigningUrl = (url: string) => {
+    const u = (url || '').trim();
+    if (!u) return 'Signing URL is missing';
+    // Production safety: reject localhost/mock links.
+    const lower = u.toLowerCase();
+    if (lower.includes('localhost') || lower.includes('127.0.0.1') || lower.includes('/firma/mock')) {
+      return 'Firma returned a localhost/mock signing link. Disable FIRMA_MOCK and configure real FIRMA_BASE_URL + FIRMA_API on the backend.';
+    }
+    // Enforce absolute URL.
+    if (!/^https?:\/\//i.test(u)) {
+      return 'Signing URL is invalid (expected absolute URL).';
+    }
+    return null;
+  };
+
+  const refreshSigningStatus = async (opts?: { silent?: boolean; signal?: AbortSignal }) => {
+    if (!contractId) return;
+    try {
+      if (!opts?.silent) setSignStatusLoading(true);
+      setSignError(null);
+      if (!opts?.silent) setPollError(null);
+      const client = new ApiClient();
+      const res =
+        signProvider === 'firma'
+          ? await client.firmaStatus(contractId, { signal: opts?.signal })
+          : await client.esignStatus(contractId);
+      if (!res.success) {
+        const msg = res.error || 'Failed to fetch status';
+        if (!opts?.silent) setSignError(msg);
+        setPollError(msg);
+        return;
+      }
+      setSignStatus(res.data as any);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to fetch status';
+      if (!opts?.silent) setSignError(msg);
+      setPollError(msg);
+    } finally {
+      if (!opts?.silent) setSignStatusLoading(false);
+    }
+  };
+
+  const startLiveStatus = () => {
+    if (!contractId) return;
+    if (polling) return;
+    setLiveStatus(true);
+    setPolling(true);
+    setPollError(null);
+    pollStartedAtRef.current = Date.now();
+    pollDelayRef.current = 2000;
+
+    const tick = async () => {
+      if (!contractId) return;
+      if (!signOpen) return;
+
+      // stop after 10 minutes
+      if (Date.now() - pollStartedAtRef.current > 10 * 60 * 1000) {
+        setPollError('Live status stopped (timeout). Click “Check status” to refresh.');
+        setPolling(false);
+        return;
+      }
+
+      const controller = new AbortController();
+      pollAbortRef.current = controller;
+
+      await refreshSigningStatus({ silent: true, signal: controller.signal });
+
+      const statusVal = String((signStatus as any)?.status || '').toLowerCase();
+      const allSigned = Boolean((signStatus as any)?.all_signed);
+      const completed = statusVal === 'completed' || statusVal === 'executed';
+
+      if (completed && (allSigned || (signProvider !== 'firma' && completed))) {
+        setPolling(false);
+        return;
+      }
+
+      // backoff up to 10s
+      pollDelayRef.current = Math.min(10000, Math.floor(pollDelayRef.current * 1.25));
+      pollTimerRef.current = window.setTimeout(tick, pollDelayRef.current);
+    };
+
+    // immediate first poll
+    void tick();
+  };
+
+  const startSigning = async () => {
+    if (!contractId) return;
+    const cleaned = signers
+      .map((s) => ({ email: s.email.trim(), name: s.name.trim() }))
+      .filter((s) => s.email && s.name);
+    if (cleaned.length === 0) {
+      setSignError('Add at least one signer (name + email)');
+      return;
+    }
+    try {
+      setSigning(true);
+      setSignError(null);
+      setPollError(null);
+      const client = new ApiClient();
+      const res =
+        signProvider === 'firma'
+          ? await client.firmaStart({
+              contract_id: contractId,
+              signers: cleaned,
+              signing_order: signingOrder,
+            })
+          : await client.esignStart({
+              contract_id: contractId,
+              signers: cleaned,
+              signing_order: signingOrder,
+            });
+      if (!res.success) {
+        setSignError(res.error || 'Failed to start signing');
+        return;
+      }
+
+      const url = String((res.data as any)?.signing_url || '');
+      const urlErr = validateSigningUrl(url);
+      if (urlErr) {
+        setSignError(urlErr);
+        setSigningUrl(null);
+        return;
+      }
+
+      setSigningUrl(url);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      // Start live polling immediately after launching signing.
+      startLiveStatus();
+    } catch (e) {
+      setSignError(e instanceof Error ? e.message : 'Failed to start signing');
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  const downloadExecuted = async () => {
+    if (!contractId) return;
+    const statusVal = String((signStatus as any)?.status || '').toLowerCase();
+    const allSigned = Boolean((signStatus as any)?.all_signed);
+    const completed = statusVal === 'completed' || statusVal === 'executed';
+    if (!completed || (signProvider === 'firma' && !allSigned)) {
+      setSignError('Signing is not completed yet.');
+      return;
+    }
+    const client = new ApiClient();
+    const res = signProvider === 'firma' ? await client.firmaDownloadExecutedPdf(contractId) : await client.esignDownloadExecutedPdf(contractId);
+    if (res.success && res.data) {
+      triggerDownload(res.data, `${title.replace(/\s+/g, '_')}_signed.pdf`);
+    } else {
+      setSignError(res.error || 'Failed to download signed PDF');
+    }
   };
 
   const downloadPdf = async () => {
@@ -484,31 +730,14 @@ const ContractEditorPageV2: React.FC = () => {
     }
   };
 
-  const filteredClauses = useMemo(() => {
-    const q = clauseSearch.trim().toLowerCase();
-    if (!q) return clauses;
-    return clauses.filter((c) => {
-      const hay = `${c.clause_id || ''} ${c.name || ''} ${c.content || ''}`.toLowerCase();
+  const filteredTemplates = useMemo(() => {
+    const q = templateSearch.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter((t) => {
+      const hay = `${t.filename} ${t.name} ${t.description || ''}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [clauses, clauseSearch]);
-
-  const insertClauseIntoEditor = (clause: ClauseCard) => {
-    const ed = editorApiRef.current;
-    if (!ed) return;
-
-    const header = clause.name ? `<p><strong>${escapeHtml(String(clause.name))}</strong></p>` : '';
-    const body = clause.content ? textToHtml(String(clause.content)) : '';
-    const payload = `${header}${body}<p></p>`;
-    ed.chain().focus().insertContent(payload).run();
-    setDirty(true);
-    setEditTick((t) => t + 1);
-  };
-
-  useEffect(() => {
-    // Reset pagination when searching.
-    setClauseLimit(50);
-  }, [clauseSearch]);
+  }, [templates, templateSearch]);
 
   return (
     <DashboardLayout>
@@ -551,72 +780,18 @@ const ContractEditorPageV2: React.FC = () => {
         )}
 
         <div className="grid grid-cols-12 gap-6">
-          {/* Clause Library */}
-          <aside className="col-span-12 lg:col-span-3 bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
-            <div className="px-6 pt-6 pb-4 border-b border-black/5">
-              <p className="text-sm font-semibold text-[#111827]">Clause Library</p>
-              <div className="mt-3 flex items-center gap-2 bg-[#F6F3ED] rounded-full px-4 py-2">
-                <svg className="w-4 h-4 text-black/35" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <input
-                  className="bg-transparent outline-none text-sm w-full"
-                  placeholder="Search clauses..."
-                  value={clauseSearch}
-                  onChange={(e) => setClauseSearch(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="p-4 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-              {filteredClauses.length === 0 ? (
-                <div className="text-sm text-black/45 p-2">No clauses available.</div>
-              ) : (
-                filteredClauses.slice(0, clauseLimit).map((c) => (
-                  <div key={c.id} className="rounded-2xl border border-black/5 bg-[#F6F3ED] p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] tracking-wider font-bold text-[#FF5C7A]">{c.clause_id || 'CLAUSE'}</p>
-                        <p className="text-sm font-semibold text-[#111827] mt-1 truncate">{c.name || 'Untitled clause'}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => insertClauseIntoEditor(c)}
-                        className="h-9 px-3 rounded-full bg-white border border-black/10 text-sm font-semibold text-[#0F141F] hover:bg-black/5"
-                        aria-label="Insert clause into editor"
-                        title="Insert into editor"
-                      >
-                        + Add
-                      </button>
-                    </div>
-                    {c.content && <p className="text-xs text-black/45 mt-2 leading-relaxed line-clamp-3">{c.content}</p>}
-                  </div>
-                ))
-              )}
-
-              {filteredClauses.length > clauseLimit && (
-                <button
-                  type="button"
-                  onClick={() => setClauseLimit((n) => n + 50)}
-                  className="w-full h-10 rounded-full border border-black/10 bg-white text-sm font-semibold text-black/70 hover:bg-black/5"
-                >
-                  Show more ({filteredClauses.length - clauseLimit} remaining)
-                </button>
-              )}
-
-              {filteredClauses.length > 0 && (
-                <div className="text-[11px] text-black/40 px-1">
-                  Showing {Math.min(filteredClauses.length, clauseLimit)} of {filteredClauses.length} clauses
-                </div>
-              )}
-            </div>
-          </aside>
-
           {/* Editor */}
-          <section className="col-span-12 lg:col-span-6 bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
+          <section className="col-span-12 lg:col-span-8 bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
             <div className="px-6 pt-5 pb-4 border-b border-black/5 flex items-center justify-between">
               <div className="text-sm font-semibold text-[#111827]">Editor</div>
               <div className="flex items-center gap-2 relative">
+                <button
+                  onClick={openSignNow}
+                  className="h-10 px-4 rounded-full bg-white border border-black/10 text-[#0F141F] text-sm font-semibold hover:bg-black/5"
+                  type="button"
+                >
+                  Sign Now
+                </button>
                 <button
                   onClick={downloadPdf}
                   className="h-10 px-4 rounded-full bg-[#0F141F] text-white text-sm font-semibold"
@@ -693,7 +868,7 @@ const ContractEditorPageV2: React.FC = () => {
               ) : (
                 <RichTextEditor
                   valueHtml={editorHtml}
-                  disabled={aiGenerating}
+                  disabled={false}
                   onEditorReady={(ed) => {
                     editorApiRef.current = ed;
                     setEditorReady(!!ed);
@@ -704,89 +879,302 @@ const ContractEditorPageV2: React.FC = () => {
                     setDirty(true);
                     setEditTick((t) => t + 1);
                   }}
-                  editorClassName={`min-h-[60vh] rounded-2xl border border-black/10 bg-white px-5 py-4 text-[13px] leading-6 text-slate-900 font-serif outline-none ${aiGenerating ? 'opacity-80' : ''}`}
+                  editorClassName="min-h-[60vh] rounded-2xl border border-black/10 bg-white px-5 py-4 text-[13px] leading-6 text-slate-900 font-serif outline-none"
                 />
               )}
             </div>
           </section>
 
-          {/* Collaboration */}
-          <aside className="col-span-12 lg:col-span-3 space-y-6">
-            {generationCtx?.template ? (
-              <div className="bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
-                <div className="px-6 pt-6 pb-4 border-b border-black/5">
-                  <p className="text-sm font-semibold text-[#111827]">Generation Details</p>
-                  <p className="text-xs text-black/45 mt-1">Carried over from Contract Generator</p>
-                </div>
-                <div className="p-5 space-y-3">
-                  <div className="text-sm">
-                    <div className="text-[11px] text-black/45 font-semibold">Template</div>
-                    <div className="text-sm font-semibold text-[#111827] break-words">{generationCtx.template}</div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-black/5 bg-[#F6F3ED] px-4 py-3">
-                      <div className="text-[11px] text-black/45 font-semibold">Selected clauses</div>
-                      <div className="text-lg font-bold text-[#0F141F]">{generationCtx.selectedClauseIds?.length || 0}</div>
-                    </div>
-                    <div className="rounded-2xl border border-black/5 bg-[#F6F3ED] px-4 py-3">
-                      <div className="text-[11px] text-black/45 font-semibold">Constraints</div>
-                      <div className="text-lg font-bold text-[#0F141F]">{generationCtx.constraints?.length || 0}</div>
-                    </div>
-                  </div>
-                  {generationCtx.updatedAt ? (
-                    <div className="text-xs text-black/45">Last saved {new Date(generationCtx.updatedAt).toLocaleString()}</div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
+          {/* Right Panel */}
+          <aside className="col-span-12 lg:col-span-4 space-y-6">
             <div className="bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
               <div className="px-6 pt-6 pb-4 border-b border-black/5">
-                <p className="text-sm font-semibold text-[#111827]">AI Content Generation</p>
-                <p className="text-xs text-black/45 mt-1">Type an instruction; the editor updates live.</p>
+                <p className="text-sm font-semibold text-[#111827]">Add Template</p>
+                <p className="text-xs text-black/45 mt-1">Insert a template into the editor, then edit manually.</p>
               </div>
               <div className="p-5">
-                <textarea
-                  className="w-full min-h-[110px] rounded-2xl bg-[#F6F3ED] border border-black/5 px-4 py-3 text-sm outline-none resize-none"
-                  placeholder="e.g. Change payment terms to Net 45, add a late fee, and update the compensation section accordingly."
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  disabled={aiGenerating}
-                />
-
-                {aiError && <div className="text-xs text-rose-600 mt-2">{aiError}</div>}
-
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={runAi}
-                    disabled={aiGenerating || !aiPrompt.trim()}
-                    className="h-10 px-4 rounded-full bg-[#FF5C7A] text-white text-sm font-semibold disabled:opacity-60"
-                  >
-                    {aiGenerating ? 'Generating…' : 'Apply to Editor'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={cancelAi}
-                    disabled={!aiGenerating}
-                    className="h-10 px-4 rounded-full bg-white border border-black/10 text-black/70 text-sm font-semibold disabled:opacity-60"
-                  >
-                    Cancel
-                  </button>
+                <div className="flex items-center gap-2 bg-[#F6F3ED] rounded-full px-4 py-2">
+                  <svg className="w-4 h-4 text-black/35" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input
+                    className="bg-transparent outline-none text-sm w-full"
+                    placeholder="Search templates…"
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                  />
                 </div>
-              </div>
-            </div>
 
-            <div className="bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
-              <div className="px-6 pt-6 pb-4 border-b border-black/5">
-                <p className="text-sm font-semibold text-[#111827]">Collaboration</p>
-              </div>
-              <div className="p-5">
-                <div className="text-sm text-black/45">No collaboration activity yet.</div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <div className="text-xs text-black/45 font-semibold">Insert mode</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTemplateInsertMode('replace')}
+                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
+                        templateInsertMode === 'replace'
+                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
+                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
+                      }`}
+                    >
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTemplateInsertMode('cursor')}
+                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
+                        templateInsertMode === 'cursor'
+                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
+                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
+                      }`}
+                    >
+                      At cursor
+                    </button>
+                  </div>
+                </div>
+
+                {templatesError && <div className="text-xs text-rose-600 mt-3">{templatesError}</div>}
+
+                <div className="mt-4 space-y-3 max-h-[38vh] overflow-y-auto pr-1">
+                  {templatesLoading ? (
+                    <div className="text-sm text-black/45">Loading templates…</div>
+                  ) : filteredTemplates.length === 0 ? (
+                    <div className="text-sm text-black/45">No templates found.</div>
+                  ) : (
+                    filteredTemplates.map((t) => (
+                      <div key={t.filename} className="rounded-2xl border border-black/5 bg-[#F6F3ED] p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-[#111827] truncate">{t.name}</p>
+                            <p className="text-[11px] text-black/45 mt-1 truncate">{t.filename}</p>
+                            {t.mine ? <p className="text-[10px] mt-1 font-bold tracking-wider text-[#FF5C7A]">MY TEMPLATE</p> : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => applyTemplateToEditor(t.filename)}
+                            disabled={templateApplying}
+                            className="h-9 px-3 rounded-full bg-white border border-black/10 text-sm font-semibold text-[#0F141F] hover:bg-black/5 disabled:opacity-60"
+                          >
+                            Add
+                          </button>
+                        </div>
+                        {t.description ? <p className="text-xs text-black/45 mt-2 line-clamp-2">{t.description}</p> : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+
               </div>
             </div>
           </aside>
         </div>
+
+        {signOpen && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+            <div className="w-full max-w-xl bg-white rounded-[28px] border border-black/10 shadow-2xl overflow-hidden">
+              <div className="px-6 pt-6 pb-4 border-b border-black/5 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-lg font-bold text-[#111827]">Sign Now</p>
+                  <p className="text-xs text-black/45 mt-1">Invite signers and open the signing link.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSignOpen(false)}
+                  className="w-10 h-10 rounded-full hover:bg-black/5 text-black/45"
+                  aria-label="Close"
+                >
+                  <svg className="w-6 h-6 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-[#111827]">Signers</div>
+                  <button
+                    type="button"
+                    onClick={() => setSigners((prev) => [...prev, { email: '', name: '' }])}
+                    className="h-9 px-3 rounded-full bg-white border border-black/10 text-sm font-semibold text-[#0F141F] hover:bg-black/5"
+                  >
+                    + Add signer
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {signers.map((s, idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                      <input
+                        className="col-span-5 h-10 rounded-2xl bg-white border border-black/10 px-4 text-sm outline-none"
+                        placeholder="Name"
+                        value={s.name}
+                        onChange={(e) =>
+                          setSigners((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))
+                        }
+                      />
+                      <input
+                        className="col-span-6 h-10 rounded-2xl bg-white border border-black/10 px-4 text-sm outline-none"
+                        placeholder="Email"
+                        value={s.email}
+                        onChange={(e) =>
+                          setSigners((prev) => prev.map((x, i) => (i === idx ? { ...x, email: e.target.value } : x)))
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSigners((prev) => prev.filter((_, i) => i !== idx))}
+                        disabled={signers.length <= 1}
+                        className="col-span-1 w-10 h-10 rounded-full hover:bg-rose-50 text-rose-600 disabled:opacity-40"
+                        aria-label="Remove signer"
+                      >
+                        <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7h6m2 0H7m2 0V5a2 2 0 012-2h2a2 2 0 012 2v2" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-[#111827]">Signing order</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSignProvider('firma')}
+                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
+                        signProvider === 'firma'
+                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
+                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
+                      }`}
+                    >
+                      Firma
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSignProvider('signnow')}
+                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
+                        signProvider === 'signnow'
+                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
+                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
+                      }`}
+                    >
+                      SignNow
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSigningOrder('sequential')}
+                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
+                        signingOrder === 'sequential'
+                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
+                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
+                      }`}
+                    >
+                      Sequential
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSigningOrder('parallel')}
+                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
+                        signingOrder === 'parallel'
+                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
+                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
+                      }`}
+                    >
+                      Parallel
+                    </button>
+                  </div>
+                </div>
+
+                {signError && <div className="text-xs text-rose-600">{signError}</div>}
+
+                {signingUrl ? (
+                  <div className="rounded-2xl border border-black/10 bg-[#F6F3ED] p-4">
+                    <div className="text-xs text-black/45 font-semibold">Signing link</div>
+                    <div className="mt-1 break-all text-sm text-[#111827]">{signingUrl}</div>
+                  </div>
+                ) : null}
+
+                {signStatus ? (
+                  <div className="rounded-2xl border border-black/10 bg-white p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs text-black/45 font-semibold">Status</div>
+                        <div className="text-sm font-semibold text-[#111827]">{String((signStatus as any)?.status || 'unknown')}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={downloadExecuted}
+                        disabled={(() => {
+                          const statusVal = String((signStatus as any)?.status || '').toLowerCase();
+                          const allSigned = Boolean((signStatus as any)?.all_signed);
+                          const completed = statusVal === 'completed' || statusVal === 'executed';
+                          return !completed || (signProvider === 'firma' && !allSigned);
+                        })()}
+                        className="h-9 px-3 rounded-full bg-[#0F141F] text-white text-sm font-semibold"
+                      >
+                        Download signed PDF
+                      </button>
+                    </div>
+
+                    {(signStatus as any)?.signers?.length ? (
+                      <div className="mt-3 space-y-2">
+                        {(signStatus as any).signers.map((s: any) => (
+                          <div key={String(s.email)} className="flex items-center justify-between text-xs">
+                            <div className="text-black/70 truncate">{String(s.name || s.email)}</div>
+                            <div className="text-black/45">{String(s.status || '')}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {pollError ? <div className="text-xs text-amber-700">{pollError}</div> : null}
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => refreshSigningStatus()}
+                    disabled={signStatusLoading}
+                    className="h-10 px-4 rounded-full bg-white border border-black/10 text-black/70 text-sm font-semibold hover:bg-black/5 disabled:opacity-60"
+                  >
+                    {signStatusLoading ? 'Checking…' : 'Check status'}
+                  </button>
+
+                  {liveStatus ? (
+                    <button
+                      type="button"
+                      onClick={stopLiveStatus}
+                      className="h-10 px-4 rounded-full bg-white border border-black/10 text-black/70 text-sm font-semibold hover:bg-black/5"
+                    >
+                      Stop live status
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={startLiveStatus}
+                      disabled={polling}
+                      className="h-10 px-4 rounded-full bg-white border border-black/10 text-black/70 text-sm font-semibold hover:bg-black/5 disabled:opacity-60"
+                    >
+                      {polling ? 'Starting…' : 'Live status'}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={startSigning}
+                    disabled={signing}
+                    className="h-10 px-4 rounded-full bg-[#FF5C7A] text-white text-sm font-semibold disabled:opacity-60"
+                  >
+                    {signing ? 'Starting…' : 'Start signing'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

@@ -226,6 +226,76 @@ export interface PrivateUploadUrlResponse {
   expires_in: number
 }
 
+export interface EsignSigner {
+  email: string
+  name: string
+}
+
+export type EsignSigningOrder = 'sequential' | 'parallel'
+
+export interface EsignStartRequest {
+  contract_id: string
+  signers: EsignSigner[]
+  signing_order?: EsignSigningOrder
+  expires_in_days?: number
+}
+
+export interface EsignSigningUrlResponse {
+  success: boolean
+  signing_url: string
+  signer_email: string
+  expires_at?: string | null
+}
+
+export interface FirmaUploadResponse {
+  success: boolean
+  contract_id: string
+  firma_document_id: string
+  status: string
+  signers_added?: number
+  message?: string
+}
+
+export interface FirmaSendResponse {
+  success: boolean
+  contract_id: string
+  status: string
+  signers_invited: number
+  expires_at?: string | null
+  message?: string
+}
+
+export interface FirmaSigningUrlResponse {
+  success: boolean
+  signing_url: string
+  signer_email: string
+  expires_at?: string | null
+}
+
+export interface FirmaStatusResponse {
+  success: boolean
+  contract_id: string
+  status: string
+  signers: Array<{
+    email: string
+    name: string
+    status: string
+    signed_at?: string | null
+    has_signed?: boolean
+  }>
+  all_signed: boolean
+  last_checked?: string | null
+  warning?: string
+}
+
+export interface FirmaSignRequest {
+  contract_id: string
+  signers: EsignSigner[]
+  signing_order?: EsignSigningOrder
+  expires_in_days?: number
+  document_name?: string
+}
+
 export type ReviewContractStatus = 'uploaded' | 'processing' | 'ready' | 'failed'
 
 export interface ReviewContractListItem {
@@ -349,7 +419,7 @@ export class ApiClient {
     data?: any,
     customHeaders?: Record<string, string>,
     allowRetry: boolean = true,
-    options?: { auth?: boolean }
+    options?: { auth?: boolean; signal?: AbortSignal }
   ): Promise<ApiResponse<T>> {
     try {
       // Support the exported singleton `apiClient` and any long-lived instances.
@@ -370,6 +440,10 @@ export class ApiClient {
         method,
         headers,
         credentials: 'include',
+      }
+
+      if (options?.signal) {
+        config.signal = options.signal
       }
 
       if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
@@ -401,7 +475,12 @@ export class ApiClient {
       if (!response.ok) {
         return {
           success: false,
-          error: responseData.message || responseData.detail || 'Request failed',
+          error:
+            responseData.error ||
+            responseData.message ||
+            responseData.detail ||
+            responseData.details ||
+            'Request failed',
           status: response.status,
         }
       }
@@ -947,6 +1026,203 @@ export class ApiClient {
 
   async downloadContractPdf(id: string): Promise<ApiResponse<Blob>> {
     return this.blobRequest(`${ApiClient.API_V1_PREFIX}/contracts/${id}/download-pdf/`)
+  }
+
+  // ==================== E-SIGN (SignNow) ====================
+  async esignUploadContract(params: { contract_id: string; document_name?: string }): Promise<ApiResponse<any>> {
+    return this.request('POST', `${ApiClient.API_V1_PREFIX}/contracts/upload/`, params)
+  }
+
+  async esignSendForSignature(params: {
+    contract_id: string
+    signers: EsignSigner[]
+    signing_order?: EsignSigningOrder
+    expires_in_days?: number
+  }): Promise<ApiResponse<any>> {
+    return this.request('POST', `${ApiClient.API_V1_PREFIX}/esign/send/`, {
+      contract_id: params.contract_id,
+      signers: params.signers,
+      signing_order: params.signing_order || 'sequential',
+      expires_in_days: params.expires_in_days ?? 30,
+    })
+  }
+
+  async esignGetSigningUrl(contractId: string, signerEmail: string): Promise<ApiResponse<EsignSigningUrlResponse>> {
+    const qs = new URLSearchParams({ signer_email: signerEmail }).toString()
+    return this.request('GET', `${ApiClient.API_V1_PREFIX}/esign/signing-url/${contractId}/?${qs}`)
+  }
+
+  async esignStatus(contractId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `${ApiClient.API_V1_PREFIX}/esign/status/${contractId}/`)
+  }
+
+  async esignDownloadExecutedPdf(contractId: string): Promise<ApiResponse<Blob>> {
+    return this.blobRequest(`${ApiClient.API_V1_PREFIX}/esign/executed/${contractId}/`)
+  }
+
+  /**
+   * Convenience wrapper used by the editor UI.
+   * Ensures the contract is uploaded (if needed), sends invitations, then returns the first signer's signing URL.
+   */
+  async esignStart(payload: EsignStartRequest): Promise<ApiResponse<{ signing_url: string }>> {
+    const contractId = payload.contract_id
+    const signers = (payload.signers || []).filter((s) => s?.email && s?.name)
+    if (!contractId || signers.length === 0) {
+      return { success: false, error: 'contract_id and at least one signer are required', status: 400 }
+    }
+
+    // 1) Upload (ignore "already uploaded" errors)
+    const uploadRes = await this.esignUploadContract({ contract_id: contractId })
+    if (!uploadRes.success) {
+      const msg = String(uploadRes.error || '')
+      const alreadyUploaded = msg.toLowerCase().includes('already uploaded')
+      if (!alreadyUploaded) {
+        return { success: false, error: uploadRes.error || 'Failed to upload contract for signing', status: uploadRes.status }
+      }
+    }
+
+    // 2) Send invites (ignore "already sent" errors)
+    const sendRes = await this.esignSendForSignature({
+      contract_id: contractId,
+      signers,
+      signing_order: payload.signing_order || 'sequential',
+      expires_in_days: payload.expires_in_days ?? 30,
+    })
+    if (!sendRes.success) {
+      const msg = String(sendRes.error || '')
+      const alreadySent = msg.toLowerCase().includes('already sent')
+      if (!alreadySent) {
+        return { success: false, error: sendRes.error || 'Failed to send signing invitations', status: sendRes.status }
+      }
+    }
+
+    // 3) Get signing URL for the first signer
+    const signerEmail = signers[0].email
+    const urlRes = await this.esignGetSigningUrl(contractId, signerEmail)
+    if (!urlRes.success) {
+      return { success: false, error: urlRes.error || 'Failed to generate signing URL', status: urlRes.status }
+    }
+
+    const signingUrl = String((urlRes.data as any)?.signing_url || '')
+    if (!signingUrl) {
+      return { success: false, error: 'Signing URL missing in response', status: 500 }
+    }
+
+    return { success: true, data: { signing_url: signingUrl }, status: 200 }
+  }
+
+  // ==================== FIRMA E-SIGN ====================
+  async sign(payload: FirmaSignRequest): Promise<ApiResponse<any>> {
+    return this.request('POST', `${ApiClient.API_V1_PREFIX}/firma/sign/`, {
+      contract_id: payload.contract_id,
+      signers: payload.signers,
+      signing_order: payload.signing_order || 'sequential',
+      expires_in_days: payload.expires_in_days ?? 30,
+      document_name: payload.document_name,
+    })
+  }
+
+  async firmaUploadContract(params: {
+    contract_id: string
+    document_name?: string
+    signers?: EsignSigner[]
+    signing_order?: EsignSigningOrder
+  }): Promise<ApiResponse<FirmaUploadResponse>> {
+    return this.request('POST', `${ApiClient.API_V1_PREFIX}/firma/contracts/upload/`, params)
+  }
+
+  async firmaSendForSignature(params: {
+    contract_id: string
+    signers: EsignSigner[]
+    signing_order?: EsignSigningOrder
+    expires_in_days?: number
+  }): Promise<ApiResponse<FirmaSendResponse>> {
+    return this.request('POST', `${ApiClient.API_V1_PREFIX}/firma/esign/send/`, {
+      contract_id: params.contract_id,
+      signers: params.signers,
+      signing_order: params.signing_order || 'sequential',
+      expires_in_days: params.expires_in_days ?? 30,
+    })
+  }
+
+  async firmaGetSigningUrl(contractId: string, signerEmail: string): Promise<ApiResponse<FirmaSigningUrlResponse>> {
+    const qs = new URLSearchParams({ signer_email: signerEmail }).toString()
+    return this.request('GET', `${ApiClient.API_V1_PREFIX}/firma/esign/signing-url/${contractId}/?${qs}`)
+  }
+
+  async firmaStatus(contractId: string, opts?: { signal?: AbortSignal }): Promise<ApiResponse<FirmaStatusResponse>> {
+    return this.request('GET', `${ApiClient.API_V1_PREFIX}/firma/esign/status/${contractId}/`, undefined, undefined, true, {
+      signal: opts?.signal,
+    })
+  }
+
+  async firmaDownloadExecutedPdf(contractId: string): Promise<ApiResponse<Blob>> {
+    return this.blobRequest(`${ApiClient.API_V1_PREFIX}/firma/esign/executed/${contractId}/`)
+  }
+
+  /**
+   * Production-grade Firma signing flow (no mock assumptions):
+   * upload -> send invites -> fetch signing URL for first signer.
+   */
+  async firmaStart(payload: FirmaSignRequest): Promise<ApiResponse<{ signing_url: string }>> {
+    const contractId = payload.contract_id
+    const signers = (payload.signers || []).filter((s) => s?.email && s?.name)
+    if (!contractId || signers.length === 0) {
+      return { success: false, error: 'contract_id and at least one signer are required', status: 400 }
+    }
+
+    // 1) Upload (ignore already uploaded)
+    const uploadRes = await this.firmaUploadContract({
+      contract_id: contractId,
+      document_name: payload.document_name,
+      signers,
+      signing_order: payload.signing_order || 'sequential',
+    })
+    if (!uploadRes.success) {
+      const msg = String(uploadRes.error || '').toLowerCase()
+      const alreadyUploaded = msg.includes('already uploaded') || msg.includes('already')
+      if (!alreadyUploaded) {
+        return { success: false, error: uploadRes.error || 'Failed to upload contract for Firma signing', status: uploadRes.status }
+      }
+    }
+
+    // 2) Send invites (ignore already sent)
+    const sendRes = await this.firmaSendForSignature({
+      contract_id: contractId,
+      signers,
+      signing_order: payload.signing_order || 'sequential',
+      expires_in_days: payload.expires_in_days ?? 30,
+    })
+    if (!sendRes.success) {
+      const msg = String(sendRes.error || '').toLowerCase()
+      const noSignersFound = msg.includes('no signers found')
+      const alreadySent = msg.includes('already sent') || msg.includes('already')
+      if (noSignersFound) {
+        return {
+          success: false,
+          error:
+            'Firma signing request has no recipients. This usually happens if the document was uploaded before signers were provided. Please re-upload/reset the Firma signing request for this contract (or create a new contract) and try again.',
+          status: sendRes.status,
+        }
+      }
+      if (!alreadySent) {
+        return { success: false, error: sendRes.error || 'Failed to send Firma signing invitations', status: sendRes.status }
+      }
+    }
+
+    // 3) Get signing URL for first signer
+    const signerEmail = signers[0].email
+    const urlRes = await this.firmaGetSigningUrl(contractId, signerEmail)
+    if (!urlRes.success) {
+      return { success: false, error: urlRes.error || 'Failed to generate Firma signing URL', status: urlRes.status }
+    }
+
+    const signingUrl = String((urlRes.data as any)?.signing_url || '')
+    if (!signingUrl) {
+      return { success: false, error: 'Signing URL missing in response', status: 500 }
+    }
+
+    return { success: true, data: { signing_url: signingUrl }, status: 200 }
   }
 
   async getTenantAiPolicy(): Promise<ApiResponse<TenantAiPolicy>> {
