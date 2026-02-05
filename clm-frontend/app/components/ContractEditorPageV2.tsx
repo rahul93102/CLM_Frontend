@@ -7,6 +7,7 @@ import DashboardLayout from './DashboardLayout';
 import RichTextEditor from './RichTextEditor';
 import { ApiClient, Contract } from '@/app/lib/api-client';
 import { sanitizeEditorHtml } from '@/app/lib/sanitize-html';
+import SignatureFieldPlacer, { type SignatureFieldPlacement } from './SignatureFieldPlacer';
 
 type TemplateListItem = {
   filename: string;
@@ -81,6 +82,32 @@ const ContractEditorPageV2: React.FC = () => {
   const [signingUrl, setSigningUrl] = useState<string | null>(null);
   const [signStatusLoading, setSignStatusLoading] = useState(false);
   const [signStatus, setSignStatus] = useState<any | null>(null);
+  const [placerOpen, setPlacerOpen] = useState(false);
+  const [placerPdfUrl, setPlacerPdfUrl] = useState<string | null>(null);
+  const [placerTemplateFilename, setPlacerTemplateFilename] = useState<string | null>(null);
+  const [placerInitial, setPlacerInitial] = useState<SignatureFieldPlacement[] | null>(null);
+  const pendingFirmaStartRef = useRef<{
+    contract_id: string;
+    signers: Array<{ email: string; name: string }>;
+    signing_order: 'sequential' | 'parallel';
+  } | null>(null);
+
+  const closePlacer = () => {
+    setPlacerOpen(false);
+    setPlacerTemplateFilename(null);
+    setPlacerInitial(null);
+    pendingFirmaStartRef.current = null;
+    setPlacerPdfUrl((prev) => {
+      if (prev && typeof window !== 'undefined') {
+        try {
+          URL.revokeObjectURL(prev);
+        } catch {
+          // ignore
+        }
+      }
+      return null;
+    });
+  };
 
   const [generationCtx, setGenerationCtx] = useState<GenerationContext | null>(null);
   const [rehydrating, setRehydrating] = useState(false);
@@ -787,6 +814,68 @@ const ContractEditorPageV2: React.FC = () => {
       setSignError(null);
       setPollError(null);
       const client = new ApiClient();
+
+      // Firma: open template-level placer first (when this contract is based on a file-template)
+      if (signProvider === 'firma') {
+        const templateFilename =
+          String((contract as any)?.metadata?.template_filename || (contract as any)?.metadata?.template || '') ||
+          String(generationCtx?.template || '');
+
+        if (templateFilename) {
+          // 1) fetch PDF for visual placement
+          const pdfRes = await client.downloadContractPdf(contractId);
+          if (!pdfRes.success || !pdfRes.data) {
+            setSignError(pdfRes.error || 'Failed to load PDF for signature placement');
+            return;
+          }
+          const url = URL.createObjectURL(pdfRes.data);
+
+          // 2) load existing placements from template meta (if any)
+          let initial: SignatureFieldPlacement[] = [];
+          const cfgRes = await client.getTemplateFileSignatureFieldsConfig(templateFilename);
+          if (cfgRes.success) {
+            const fields = (cfgRes.data as any)?.config?.fields;
+            if (Array.isArray(fields)) {
+              initial = fields
+                .filter((f: any) => f && f.type === 'signature' && f.position)
+                .map((f: any) => ({
+                  recipient_index: Number(f.recipient_index ?? 0),
+                  page_number: Number(f.page_number ?? 1),
+                  position: {
+                    x: Number(f.position?.x ?? 10),
+                    y: Number(f.position?.y ?? 80),
+                    width: Number(f.position?.width ?? 30),
+                    height: Number(f.position?.height ?? 8),
+                  },
+                }))
+                .filter((p: any) => Number.isFinite(p.recipient_index));
+            }
+          }
+
+          // Ensure each signer has a placement slot
+          const byIdx = new Map<number, SignatureFieldPlacement>();
+          for (const p of initial) byIdx.set(p.recipient_index, p);
+          const ensured: SignatureFieldPlacement[] = cleaned.map((_, idx) =>
+            byIdx.get(idx) || {
+              recipient_index: idx,
+              page_number: 1,
+              position: { x: 10, y: Math.max(10, 80 - idx * 12), width: 30, height: 8 },
+            }
+          );
+
+          pendingFirmaStartRef.current = {
+            contract_id: contractId,
+            signers: cleaned,
+            signing_order: signingOrder,
+          };
+          setPlacerTemplateFilename(templateFilename);
+          setPlacerPdfUrl(url);
+          setPlacerInitial(ensured);
+          setPlacerOpen(true);
+          return;
+        }
+      }
+
       const res =
         signProvider === 'firma'
           ? await client.firmaStart({
@@ -818,6 +907,54 @@ const ContractEditorPageV2: React.FC = () => {
       startLiveStatus();
     } catch (e) {
       setSignError(e instanceof Error ? e.message : 'Failed to start signing');
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  const saveTemplatePlacementsAndContinueFirma = async (placements: SignatureFieldPlacement[]) => {
+    const templateFilename = placerTemplateFilename;
+    const pending = pendingFirmaStartRef.current;
+    if (!templateFilename || !pending) {
+      closePlacer();
+      setSignError('Missing template context for saving signature positions');
+      return;
+    }
+
+    try {
+      setSigning(true);
+      setSignError(null);
+
+      const client = new ApiClient();
+      const saveRes = await client.saveTemplateFileSignaturePositions(templateFilename, placements);
+      if (!saveRes.success) {
+        setSignError(saveRes.error || 'Failed to save signature positions for template');
+        return;
+      }
+
+      const res = await client.firmaStart({
+        contract_id: pending.contract_id,
+        signers: pending.signers,
+        signing_order: pending.signing_order,
+        force_upload: true,
+      });
+      if (!res.success) {
+        setSignError(res.error || 'Failed to start signing');
+        return;
+      }
+
+      const url = String((res.data as any)?.signing_url || '');
+      const urlErr = validateSigningUrl(url);
+      if (urlErr) {
+        setSignError(urlErr);
+        setSigningUrl(null);
+        return;
+      }
+
+      closePlacer();
+      setSigningUrl(url);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      startLiveStatus();
     } finally {
       setSigning(false);
     }
@@ -1383,6 +1520,16 @@ const ContractEditorPageV2: React.FC = () => {
           </div>
         )}
       </div>
+      <SignatureFieldPlacer
+        open={placerOpen}
+        pdfUrl={placerPdfUrl || ''}
+        signers={signers
+          .map((s) => ({ name: s.name.trim(), email: s.email.trim() }))
+          .filter((s) => s.name && s.email)}
+        initialPlacements={placerInitial || undefined}
+        onCancel={closePlacer}
+        onSave={saveTemplatePlacementsAndContinueFirma}
+      />
     </DashboardLayout>
   );
 };

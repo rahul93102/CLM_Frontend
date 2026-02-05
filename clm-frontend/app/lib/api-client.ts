@@ -294,6 +294,35 @@ export interface FirmaSignRequest {
   signing_order?: EsignSigningOrder
   expires_in_days?: number
   document_name?: string
+  /** Force re-upload/reset vendor signing request (ensures updated signature fields + latest PDF). */
+  force_upload?: boolean
+}
+
+export interface SignatureFieldPosition {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface TemplateSignatureFieldPlacement {
+  recipient_index: number
+  page_number: number
+  position: SignatureFieldPosition
+}
+
+export interface TemplateSignatureFieldsConfig {
+  fields: Array<{
+    label?: string
+    type: 'signature'
+    page_number: number
+    position: SignatureFieldPosition
+    required?: boolean
+    recipient_index: number
+  }>
+  auto_stack?: boolean
+  stack_spacing?: number
+  source?: string
 }
 
 export type ReviewContractStatus = 'uploaded' | 'processing' | 'ready' | 'failed'
@@ -1130,6 +1159,7 @@ export class ApiClient {
     document_name?: string
     signers?: EsignSigner[]
     signing_order?: EsignSigningOrder
+    force?: boolean
   }): Promise<ApiResponse<FirmaUploadResponse>> {
     return this.request('POST', `${ApiClient.API_V1_PREFIX}/firma/contracts/upload/`, params)
   }
@@ -1180,6 +1210,7 @@ export class ApiClient {
       document_name: payload.document_name,
       signers,
       signing_order: payload.signing_order || 'sequential',
+      force: Boolean(payload.force_upload),
     })
     if (!uploadRes.success) {
       const msg = String(uploadRes.error || '').toLowerCase()
@@ -1363,6 +1394,24 @@ export class ApiClient {
       selected_clauses: params.selectedClauses || [],
       custom_clauses: params.customClauses || [],
       constraints: params.constraints || [],
+    })
+  }
+
+  // ==================== TEMPLATE FIRMA SIGNATURE FIELDS (FILE TEMPLATES) ====================
+  async getTemplateFileSignatureFieldsConfig(
+    filename: string
+  ): Promise<ApiResponse<{ success: boolean; filename: string; config: TemplateSignatureFieldsConfig; source?: string }>> {
+    const safe = encodeURIComponent(filename)
+    return this.request('GET', `${ApiClient.API_V1_PREFIX}/templates/files/signature-fields-config/${safe}/`)
+  }
+
+  async saveTemplateFileSignaturePositions(
+    filename: string,
+    positions: TemplateSignatureFieldPlacement[]
+  ): Promise<ApiResponse<{ success: boolean; filename: string; config: TemplateSignatureFieldsConfig }>> {
+    const safe = encodeURIComponent(filename)
+    return this.request('POST', `${ApiClient.API_V1_PREFIX}/templates/files/drag-signature-positions/${safe}/`, {
+      positions,
     })
   }
 
