@@ -1133,12 +1133,14 @@ export class ApiClient {
     contract_type?: string
     rendered_text?: string
     rendered_html?: string
+    metadata?: Record<string, any>
   }): Promise<ApiResponse<any>> {
     return this.request('POST', `${ApiClient.API_V1_PREFIX}/contracts/create-from-content/`, {
       title: params.title,
       contract_type: params.contract_type,
       rendered_text: params.rendered_text,
       rendered_html: params.rendered_html,
+      metadata: params.metadata,
     })
   }
 

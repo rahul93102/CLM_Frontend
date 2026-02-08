@@ -571,6 +571,12 @@ const CreateContractInner = () => {
   const createDraftFromAi = async () => {
     try {
       setAiError(null);
+
+      if (!user) {
+        setAiError('Please sign in to create a draft.');
+        return;
+      }
+
       setLoading(true);
       const client = new ApiClient();
       const renderedText = aiEditorApiRef.current?.getText() ?? aiBaseText;
@@ -582,6 +588,22 @@ const CreateContractInner = () => {
         contract_type: schema?.template_type || selectedTemplateObj?.contract_type,
         rendered_text: renderedText,
         rendered_html: renderedHtml,
+        metadata: selectedTemplate
+          ? {
+              source: 'ai_builder',
+              template_filename: selectedTemplate,
+              template: selectedTemplate,
+              form_inputs: fieldValues || {},
+              selected_clause_ids: selectedClauseIds || [],
+              selected_clauses: selectedClauseIds || [],
+              custom_clauses: customClauses || [],
+              constraints: constraints || [],
+              editor_client_updated_at_ms: Date.now(),
+            }
+          : {
+              source: 'ai_builder',
+              editor_client_updated_at_ms: Date.now(),
+            },
       });
       if (!res.success) {
         setAiError(res.error || 'Failed to create draft');
@@ -591,6 +613,20 @@ const CreateContractInner = () => {
       if (!id) {
         setAiError('Draft created but no contract id returned');
         return;
+      }
+
+      if (selectedTemplate) {
+        // Persist generation context so the editor + signing flow can access template inputs/clauses.
+        writeGenerationContext({
+          contractId: String(id),
+          template: selectedTemplate,
+          fieldValues: fieldValues || {},
+          selectedClauseIds: selectedClauseIds || [],
+          customClauses: customClauses || [],
+          constraints: constraints || [],
+          updatedAt: aiDraftUpdatedAt || Date.now(),
+          createdAt: Date.now(),
+        });
       }
 
       if (selectedTemplate) {
@@ -977,7 +1013,7 @@ const CreateContractInner = () => {
                       <button
                         type="button"
                         onClick={createDraftFromAi}
-                        disabled={loading || aiGenerating || !aiBaseText.trim()}
+                        disabled={loading || aiGenerating || !aiBaseText.trim() || !user}
                         className="h-10 px-4 rounded-full bg-white border border-black/10 text-sm font-semibold text-[#111827] hover:bg-black/5 disabled:opacity-60"
                       >
                         Create Draft

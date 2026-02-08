@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { CheckCircle2, Clock3, XCircle } from 'lucide-react';
 import DashboardLayout from '../../../components/DashboardLayout';
-import { ApiClient, type Contract } from '../../../lib/api-client';
+import { ApiClient } from '../../../lib/api-client';
 
 type StepKey = 'invite_sent' | 'recipient_received' | 'signature_pending' | 'completed';
 
@@ -131,13 +131,6 @@ function normalizeFirmaStatusLabel(value: any): string {
 	return raw;
 }
 
-function unwrapContractLike(value: any): Contract | null {
-	if (!value) return null;
-	if (value?.contract) return value.contract as Contract;
-	if (value?.data?.contract) return value.data.contract as Contract;
-	return value as Contract;
-}
-
 function computeSteps(statusData: any): Record<StepKey, boolean> {
 	const status = String(statusData?.status || '').toLowerCase();
 	const signers = Array.isArray(statusData?.signers) ? statusData.signers : [];
@@ -225,7 +218,9 @@ export default function SigningStatusPage() {
 
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [contract, setContract] = useState<Contract | null>(null);
+	// NOTE: This page intentionally does NOT call `/api/v1/contracts/:id`.
+	// Some deployments return a 404 for that endpoint (e.g. unauthenticated users),
+	// which caused noisy repeated 404s because this page polls frequently.
 
 	const [statusData, setStatusData] = useState<any | null>(null);
 	const [details, setDetails] = useState<any | null>(null);
@@ -251,20 +246,41 @@ export default function SigningStatusPage() {
 		return status === 'declined' || anyDeclined;
 	}, [statusData]);
 
+	const displayTitle = useMemo(() => {
+		const d: any = details as any;
+		const s: any = statusData as any;
+		const picked =
+			d?.title ||
+			d?.name ||
+			d?.document_title ||
+			d?.document_name ||
+			d?.document?.title ||
+			d?.document?.name ||
+			d?.signing_request?.title ||
+			d?.signing_request?.name ||
+			s?.title ||
+			s?.name ||
+			s?.document_title ||
+			s?.document_name ||
+			'Signing status';
+		return String(picked || 'Signing status');
+	}, [details, statusData]);
+
+	const safeFilenameBase = useMemo(() => {
+		const raw = String(displayTitle || contractId || 'contract').trim();
+		return raw.replace(/\s+/g, '_');
+	}, [displayTitle, contractId]);
+
 	const refreshAll = async () => {
 		if (!contractId) return;
 		try {
 			const client = new ApiClient();
-			const [cRes, sRes, dRes, rRes, aRes] = await Promise.all([
-				client.getContractById(contractId),
+			const [sRes, dRes, rRes, aRes] = await Promise.all([
 				client.firmaStatus(contractId),
 				client.firmaDetails(contractId),
 				client.firmaReminders(contractId),
 				client.firmaActivityLog(contractId, 50),
 			]);
-
-			if (!cRes.success) throw new Error(cRes.error || 'Failed to load contract');
-			setContract(unwrapContractLike(cRes.data));
 
 			if (sRes.success) {
 				setStatusData(sRes.data);
@@ -282,6 +298,9 @@ export default function SigningStatusPage() {
 			if (dRes.success) setDetails(dRes.data);
 			if (rRes.success) setReminders(rRes.data);
 			if (aRes.success) setActivity((aRes.data as any)?.results || []);
+			if (!sRes.success && !dRes.success && !rRes.success && !aRes.success) {
+				throw new Error(sRes.error || dRes.error || rRes.error || aRes.error || 'Failed to load signing status');
+			}
 			setLastRefreshMs(Date.now());
 		} catch (e) {
 			setError(e instanceof Error ? e.message : 'Failed to load signing status');
@@ -379,7 +398,7 @@ export default function SigningStatusPage() {
 			const blobUrl = URL.createObjectURL(res.data);
 			const a = document.createElement('a');
 			a.href = blobUrl;
-			a.download = `${(contract?.title || 'contract').replace(/\s+/g, '_')}_signed.pdf`;
+			a.download = `${safeFilenameBase}_signed.pdf`;
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -403,7 +422,7 @@ export default function SigningStatusPage() {
 			const blobUrl = URL.createObjectURL(res.data);
 			const a = document.createElement('a');
 			a.href = blobUrl;
-			a.download = `${(contract?.title || 'contract').replace(/\s+/g, '_')}_certificate.pdf`;
+			a.download = `${safeFilenameBase}_certificate.pdf`;
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -418,7 +437,7 @@ export default function SigningStatusPage() {
 			<div className="flex items-center justify-between gap-4 mb-6">
 				<div className="min-w-0">
 					<div className="flex items-center gap-3 flex-wrap">
-						<h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 truncate">{contract?.title || 'Signing status'}</h1>
+						<h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 truncate">{displayTitle || 'Signing status'}</h1>
 						{(() => {
 							const statusLabel = declined
 								? 'DECLINED'

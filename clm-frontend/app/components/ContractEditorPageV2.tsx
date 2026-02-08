@@ -75,8 +75,6 @@ const ContractEditorPageV2: React.FC = () => {
   // E-sign
   const [signOpen, setSignOpen] = useState(false);
   const [signers, setSigners] = useState<SignerDraft[]>([{ email: '', name: '' }]);
-  const [signProvider, setSignProvider] = useState<'firma' | 'signnow'>('firma');
-  const [signingOrder, setSigningOrder] = useState<'sequential' | 'parallel'>('sequential');
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [signingUrl, setSigningUrl] = useState<string | null>(null);
@@ -699,7 +697,7 @@ const ContractEditorPageV2: React.FC = () => {
     setLiveStatus(false);
   };
 
-  const openSignNow = () => {
+  const openFirmaSigning = () => {
     setSignError(null);
     setSigningUrl(null);
     setSignStatus(null);
@@ -737,10 +735,7 @@ const ContractEditorPageV2: React.FC = () => {
       setSignError(null);
       if (!opts?.silent) setPollError(null);
       const client = new ApiClient();
-      const res =
-        signProvider === 'firma'
-          ? await client.firmaStatus(contractId, { signal: opts?.signal })
-          : await client.esignStatus(contractId);
+      const res = await client.firmaStatus(contractId, { signal: opts?.signal });
       if (!res.success) {
         const msg = res.error || 'Failed to fetch status';
         if (!opts?.silent) setSignError(msg);
@@ -786,7 +781,7 @@ const ContractEditorPageV2: React.FC = () => {
       const allSigned = Boolean((signStatus as any)?.all_signed);
       const completed = statusVal === 'completed' || statusVal === 'executed';
 
-      if (completed && (allSigned || (signProvider !== 'firma' && completed))) {
+      if (completed && allSigned) {
         setPolling(false);
         return;
       }
@@ -815,83 +810,73 @@ const ContractEditorPageV2: React.FC = () => {
       setPollError(null);
       const client = new ApiClient();
 
-
-        // Firma's multi-signer flow is always invite-all (parallel). Keep UI state for SignNow.
-        const effectiveSigningOrder = signProvider === 'firma' ? 'parallel' : signingOrder;
+      // Firma's multi-signer flow is always invite-all (parallel).
+      const effectiveSigningOrder: 'parallel' = 'parallel';
 
       // Firma: open template-level placer first (when this contract is based on a file-template)
-      if (signProvider === 'firma') {
-        const templateFilename =
-          String((contract as any)?.metadata?.template_filename || (contract as any)?.metadata?.template || '') ||
-          String(generationCtx?.template || '');
+      const templateFilename =
+        String((contract as any)?.metadata?.template_filename || (contract as any)?.metadata?.template || '') ||
+        String(generationCtx?.template || '');
 
-        if (templateFilename) {
-          // 1) fetch PDF for visual placement
-          const pdfRes = await client.downloadContractPdf(contractId);
-          if (!pdfRes.success || !pdfRes.data) {
-            setSignError(pdfRes.error || 'Failed to load PDF for signature placement');
-            return;
-          }
-          const url = URL.createObjectURL(pdfRes.data);
-
-          // 2) load existing placements from template meta (if any)
-          let initial: SignatureFieldPlacement[] = [];
-          const cfgRes = await client.getTemplateFileSignatureFieldsConfig(templateFilename);
-          if (cfgRes.success) {
-            const fields = (cfgRes.data as any)?.config?.fields;
-            if (Array.isArray(fields)) {
-              initial = fields
-                .filter((f: any) => f && f.type === 'signature' && f.position)
-                .map((f: any) => ({
-                  recipient_index: Number(f.recipient_index ?? 0),
-                  page_number: Number(f.page_number ?? 1),
-                  position: {
-                    x: Number(f.position?.x ?? 10),
-                    y: Number(f.position?.y ?? 80),
-                    width: Number(f.position?.width ?? 30),
-                    height: Number(f.position?.height ?? 8),
-                  },
-                }))
-                .filter((p: any) => Number.isFinite(p.recipient_index));
-            }
-          }
-
-          // Ensure each signer has a placement slot
-          const byIdx = new Map<number, SignatureFieldPlacement>();
-          for (const p of initial) byIdx.set(p.recipient_index, p);
-          const ensured: SignatureFieldPlacement[] = cleaned.map((_, idx) =>
-            byIdx.get(idx) || {
-              recipient_index: idx,
-              page_number: 1,
-              position: { x: 10, y: Math.max(10, 80 - idx * 12), width: 30, height: 8 },
-            }
-          );
-
-          pendingFirmaStartRef.current = {
-            contract_id: contractId,
-            signers: cleaned,
-            signing_order: effectiveSigningOrder,
-          };
-          setPlacerTemplateFilename(templateFilename);
-          setPlacerPdfUrl(url);
-          setPlacerInitial(ensured);
-          setPlacerOpen(true);
+      if (templateFilename) {
+        // 1) fetch PDF for visual placement
+        const pdfRes = await client.downloadContractPdf(contractId);
+        if (!pdfRes.success || !pdfRes.data) {
+          setSignError(pdfRes.error || 'Failed to load PDF for signature placement');
           return;
         }
+        const url = URL.createObjectURL(pdfRes.data);
+
+        // 2) load existing placements from template meta (if any)
+        let initial: SignatureFieldPlacement[] = [];
+        const cfgRes = await client.getTemplateFileSignatureFieldsConfig(templateFilename);
+        if (cfgRes.success) {
+          const fields = (cfgRes.data as any)?.config?.fields;
+          if (Array.isArray(fields)) {
+            initial = fields
+              .filter((f: any) => f && f.type === 'signature' && f.position)
+              .map((f: any) => ({
+                recipient_index: Number(f.recipient_index ?? 0),
+                page_number: Number(f.page_number ?? 1),
+                position: {
+                  x: Number(f.position?.x ?? 10),
+                  y: Number(f.position?.y ?? 80),
+                  width: Number(f.position?.width ?? 30),
+                  height: Number(f.position?.height ?? 8),
+                },
+              }))
+              .filter((p: any) => Number.isFinite(p.recipient_index));
+          }
+        }
+
+        // Ensure each signer has a placement slot
+        const byIdx = new Map<number, SignatureFieldPlacement>();
+        for (const p of initial) byIdx.set(p.recipient_index, p);
+        const ensured: SignatureFieldPlacement[] = cleaned.map((_, idx) =>
+          byIdx.get(idx) || {
+            recipient_index: idx,
+            page_number: 1,
+            position: { x: 10, y: Math.max(10, 80 - idx * 12), width: 30, height: 8 },
+          }
+        );
+
+        pendingFirmaStartRef.current = {
+          contract_id: contractId,
+          signers: cleaned,
+          signing_order: effectiveSigningOrder,
+        };
+        setPlacerTemplateFilename(templateFilename);
+        setPlacerPdfUrl(url);
+        setPlacerInitial(ensured);
+        setPlacerOpen(true);
+        return;
       }
 
-      const res =
-        signProvider === 'firma'
-          ? await client.firmaStart({
-              contract_id: contractId,
-              signers: cleaned,
-              signing_order: effectiveSigningOrder,
-            })
-          : await client.esignStart({
-              contract_id: contractId,
-              signers: cleaned,
-              signing_order: effectiveSigningOrder,
-            });
+      const res = await client.firmaStart({
+        contract_id: contractId,
+        signers: cleaned,
+        signing_order: effectiveSigningOrder,
+      });
       if (!res.success) {
         setSignError(res.error || 'Failed to start signing');
         return;
@@ -974,12 +959,12 @@ const ContractEditorPageV2: React.FC = () => {
     const statusVal = String((signStatus as any)?.status || '').toLowerCase();
     const allSigned = Boolean((signStatus as any)?.all_signed);
     const completed = statusVal === 'completed' || statusVal === 'executed';
-    if (!completed || (signProvider === 'firma' && !allSigned)) {
+    if (!completed || !allSigned) {
       setSignError('Signing is not completed yet.');
       return;
     }
     const client = new ApiClient();
-    const res = signProvider === 'firma' ? await client.firmaDownloadExecutedPdf(contractId) : await client.esignDownloadExecutedPdf(contractId);
+    const res = await client.firmaDownloadExecutedPdf(contractId);
     if (res.success && res.data) {
       triggerDownload(res.data, `${title.replace(/\s+/g, '_')}_signed.pdf`);
     } else {
@@ -1092,11 +1077,11 @@ const ContractEditorPageV2: React.FC = () => {
               <div className="text-sm font-semibold text-[#111827]">Editor</div>
               <div className="flex items-center gap-2 relative">
                 <button
-                  onClick={openSignNow}
+                  onClick={openFirmaSigning}
                   className="h-10 px-4 rounded-full bg-white border border-black/10 text-[#0F141F] text-sm font-semibold hover:bg-black/5"
                   type="button"
                 >
-                  Sign Now
+                  Send for signature
                 </button>
                 <button
                   onClick={downloadPdf}
@@ -1353,53 +1338,8 @@ const ContractEditorPageV2: React.FC = () => {
 
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold text-[#111827]">Provider</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSignProvider('firma')}
-                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
-                        signProvider === 'firma'
-                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
-                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
-                      }`}
-                    >
-                      Firma
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSignProvider('signnow')}
-                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
-                        signProvider === 'signnow'
-                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
-                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
-                      }`}
-                    >
-                      SignNow
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSigningOrder('sequential')}
-                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
-                        signingOrder === 'sequential'
-                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
-                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
-                      }`}
-                    >
-                      Sequential
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSigningOrder('parallel')}
-                      className={`h-8 px-3 rounded-full text-xs font-semibold border ${
-                        signingOrder === 'parallel'
-                          ? 'bg-[#0F141F] text-white border-[#0F141F]'
-                          : 'bg-white text-black/70 border-black/10 hover:bg-black/5'
-                      }`}
-                    >
-                      Parallel
-                    </button>
+                  <div className="h-8 px-3 rounded-full text-xs font-semibold border bg-[#0F141F] text-white border-[#0F141F]">
+                    Firma.dev
                   </div>
                 </div>
 
@@ -1426,7 +1366,7 @@ const ContractEditorPageV2: React.FC = () => {
                           const statusVal = String((signStatus as any)?.status || '').toLowerCase();
                           const allSigned = Boolean((signStatus as any)?.all_signed);
                           const completed = statusVal === 'completed' || statusVal === 'executed';
-                          return !completed || (signProvider === 'firma' && !allSigned);
+                          return !completed || !allSigned;
                         })()}
                         className="h-9 px-3 rounded-full bg-[#0F141F] text-white text-sm font-semibold"
                       >
