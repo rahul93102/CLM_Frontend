@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import DashboardLayout from './DashboardLayout';
 import { useRouter } from 'next/navigation';
 import {
-  Bell,
   ChevronDown,
   Download,
   FileText,
@@ -49,8 +48,11 @@ const TemplateLibrary: React.FC = () => {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [showOnlyMine, setShowOnlyMine] = useState(false);
   const [templatesMenuOpen, setTemplatesMenuOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [semanticMatches, setSemanticMatches] = useState<string[] | null>(null);
+  const [showAllList, setShowAllList] = useState(false);
   const router = useRouter();
+
+  const LIST_LIMIT = 18;
 
   useEffect(() => {
     fetchTemplates();
@@ -115,17 +117,36 @@ const TemplateLibrary: React.FC = () => {
     return () => document.removeEventListener('click', onDocClick);
   }, [templatesMenuOpen]);
 
+  // Semantic search for templates (debounced)
   useEffect(() => {
-    if (!notificationsOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      if (target.closest('[data-notifications-menu]')) return;
-      setNotificationsOpen(false);
-    };
-    document.addEventListener('click', onDocClick);
-    return () => document.removeEventListener('click', onDocClick);
-  }, [notificationsOpen]);
+    const q = search.trim();
+    if (!q || q.length < 2) {
+      setSemanticMatches(null);
+      return;
+    }
+    if (!user) {
+      setSemanticMatches(null);
+      return;
+    }
+
+    const t = window.setTimeout(async () => {
+      try {
+        const client = new ApiClient();
+        const res = await client.semanticSearchWithParams(q, { entity_type: 'template', limit: '50' });
+        const results = (res.data as any)?.results || [];
+        const filenames: string[] = [];
+        for (const r of results) {
+          const fn = (r?.metadata && (r.metadata.filename as string)) || '';
+          if (fn) filenames.push(fn);
+        }
+        setSemanticMatches(filenames.length ? filenames : []);
+      } catch {
+        setSemanticMatches(null);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(t);
+  }, [search, user]);
 
   const fetchTemplates = async () => {
     try {
@@ -209,9 +230,11 @@ const TemplateLibrary: React.FC = () => {
 
   const stats = useMemo(() => {
     const total = templates.length;
-    const lastUpdated = templates
-      .filter((t) => t.updated_at)
-      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))[0];
+    const activeCount = templates.filter((t) => {
+      const s = String(t.status || '').toLowerCase();
+      return s === 'published' || s === 'active';
+    }).length;
+    const draftCount = Math.max(total - activeCount, 0);
 
     const byName = new Map<string, number>();
     templates.forEach((t) => {
@@ -223,8 +246,8 @@ const TemplateLibrary: React.FC = () => {
       total,
       mostUsedName: mostUsed?.[0] || (templates[0]?.name || '—'),
       mostUsedCount: mostUsed?.[1] || 0,
-      lastUpdatedName: lastUpdated?.name || '—',
-      lastUpdatedWhen: lastUpdated?.updated_at ? new Date(lastUpdated.updated_at).toLocaleDateString() : '—',
+      activeCount,
+      draftCount,
     };
   }, [templates]);
 
@@ -242,7 +265,7 @@ const TemplateLibrary: React.FC = () => {
 
   const filteredTemplates = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return templates
+    const base = templates
       .filter((t) => {
         const ct = (t.contract_type || '').toLowerCase();
         if (activeCategory === 'All') return true;
@@ -257,12 +280,32 @@ const TemplateLibrary: React.FC = () => {
           (t.created_by_id && t.created_by_id === user.user_id) ||
           (t.created_by_email && t.created_by_email === user.email)
         );
-      })
-      .filter((t) => {
-        if (!s) return true;
-        return (t.name || '').toLowerCase().includes(s) || (t.description || '').toLowerCase().includes(s);
       });
-  }, [templates, search, activeCategory, showOnlyMine, user]);
+
+    // Prefer semantic matches when available; fallback to local substring matching.
+    if (s && semanticMatches && semanticMatches.length > 0) {
+      const set = new Set(semanticMatches);
+      const rank = new Map<string, number>();
+      semanticMatches.forEach((fn, idx) => rank.set(fn, idx));
+      return base
+        .filter((t) => set.has(t.filename))
+        .sort((a, b) => (rank.get(a.filename) ?? 9999) - (rank.get(b.filename) ?? 9999));
+    }
+
+    return base.filter((t) => {
+      if (!s) return true;
+      return (
+        (t.name || '').toLowerCase().includes(s) ||
+        (t.filename || '').toLowerCase().includes(s) ||
+        (t.description || '').toLowerCase().includes(s)
+      );
+    });
+  }, [templates, search, activeCategory, showOnlyMine, user, semanticMatches]);
+
+  const listTemplates = useMemo(() => {
+    if (showAllList) return filteredTemplates;
+    return filteredTemplates.slice(0, LIST_LIMIT);
+  }, [filteredTemplates, showAllList]);
 
   const downloadTemplateTxt = () => {
     if (!selectedTemplate || !rawTemplateDoc) return;
@@ -352,8 +395,8 @@ const TemplateLibrary: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1 min-w-[220px]">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="relative w-full sm:w-auto sm:flex-1 sm:min-w-[220px]">
               <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
               <input
                 value={search}
@@ -371,66 +414,25 @@ const TemplateLibrary: React.FC = () => {
                 }
                 setCreateOpen(true);
               }}
-              className="inline-flex items-center gap-2 rounded-full bg-[#0F141F] text-white px-5 py-3 text-sm font-semibold"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-[#0F141F] text-white px-5 py-3 text-sm font-semibold w-full sm:w-auto"
             >
               <PlusCircle className="w-4 h-4" />
               New Template
             </button>
-
-            <div className="relative" data-notifications-menu>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-white border border-slate-200 hover:bg-slate-50"
-                aria-label="Notifications"
-                onClick={() => setNotificationsOpen((v) => !v)}
-              >
-                <Bell className="w-5 h-5 text-slate-700" />
-              </button>
-
-              {notificationsOpen && (
-                <div className="absolute right-0 top-14 z-40 w-[360px] rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden">
-                  <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-semibold text-slate-500">Updates</div>
-                      <div className="text-sm font-bold text-slate-900">Notifications</div>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-sm font-semibold text-rose-600 hover:text-rose-700"
-                      onClick={() => {
-                        setNotificationsOpen(false);
-                        router.push('/notifications');
-                      }}
-                    >
-                      View all
-                    </button>
-                  </div>
-                  <div className="px-4 py-6 text-sm text-slate-500">No notifications yet.</div>
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
         {/* Top Stat Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
           <div className="rounded-2xl bg-gradient-to-br from-rose-400 to-pink-500 text-white p-6 relative overflow-hidden">
             <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 80% 30%, #fff 0 2px, transparent 3px)' }} />
             <p className="text-white/90 text-sm">Total Templates</p>
-            <p className="text-5xl font-bold mt-2">{stats.total}</p>
-            <div className="inline-flex items-center mt-4 px-3 py-1 rounded-full bg-white/20 text-xs">
-              +{Math.min(stats.total, 2)} this month
-            </div>
           </div>
 
           <div className="rounded-2xl bg-white border border-slate-200 p-6">
             <p className="text-slate-500 text-sm">Recently Used</p>
             <p className="text-xl font-bold text-slate-900 mt-2">{stats.mostUsedName}</p>
             <p className="text-xs text-slate-500 mt-1">Used {stats.mostUsedCount} times</p>
-            <div className="mt-4 inline-flex items-center gap-2 text-rose-500 text-sm font-semibold">
-              <span className="w-4 h-4 rounded bg-rose-50 border border-rose-200 inline-flex items-center justify-center">↗</span>
-              Popular choice
-            </div>
           </div>
 
           <div className="rounded-2xl bg-white border border-slate-200 p-6">
@@ -438,19 +440,11 @@ const TemplateLibrary: React.FC = () => {
             <p className="text-4xl font-bold text-slate-900 mt-2">
               {String(myTemplatesCount ?? 0).padStart(2, '0')}
             </p>
-            <div className="mt-4 flex items-center gap-2">
-              <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 text-xs font-bold flex items-center justify-center">JD</span>
-              <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center">+2</span>
-            </div>
-            {!user && <p className="text-xs text-slate-400 mt-3">Log in to track your templates.</p>}
+            <p className="text-xs text-slate-500 mt-3">
+              {user ? 'Templates you created and saved.' : 'Log in to track your templates.'}
+            </p>
           </div>
 
-          <div className="rounded-2xl bg-white border border-slate-200 p-6">
-            <p className="text-slate-500 text-sm">Last Updated</p>
-            <p className="text-xl font-bold text-slate-900 mt-2">{stats.lastUpdatedName}</p>
-            <p className="text-xs text-slate-500 mt-1">Updated {stats.lastUpdatedWhen}</p>
-            <p className="text-xs text-slate-400 mt-4">Version 1.0</p>
-          </div>
         </div>
 
         {/* Main Grid */}
@@ -499,8 +493,15 @@ const TemplateLibrary: React.FC = () => {
                     My
                   </button>
                   <button
-                    onClick={() => setCreateOpen(true)}
-                    className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900"
+                    type="button"
+                    onClick={() => {
+                      if (!user) {
+                        setError('Please log in to create templates.');
+                        return;
+                      }
+                      setCreateOpen(true);
+                    }}
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 hover:text-slate-700"
                   >
                     <Plus className="w-4 h-4" />
                     New
@@ -508,7 +509,7 @@ const TemplateLibrary: React.FC = () => {
                 </div>
               </div>
 
-              <div className="mt-3 space-y-3">
+              <div className="mt-4">
                 {loading ? (
                   <div className="text-slate-500 text-sm py-8 text-center">Loading templates…</div>
                 ) : error ? (
@@ -516,40 +517,58 @@ const TemplateLibrary: React.FC = () => {
                 ) : filteredTemplates.length === 0 ? (
                   <div className="text-slate-500 text-sm py-8 text-center">No templates found</div>
                 ) : (
-                  filteredTemplates.map((t) => {
-                    const pill = statusPill(t.status);
-                    const active = selectedTemplate?.id === t.id;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => setSelectedTemplate(t)}
-                        className={`w-full text-left rounded-2xl border p-4 transition ${
-                          active ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center">
-                            {(t.contract_type || '').toLowerCase().includes('nda') ? (
-                              <Shield className="w-5 h-5 text-slate-700" />
-                            ) : (
-                              <FileText className="w-5 h-5 text-slate-700" />
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-slate-900 truncate">{t.name}</p>
-                            <p className="text-xs text-slate-500 mt-1 truncate">
-                              {t.description || 'Template'}
-                            </p>
-                            <div className="mt-2 flex items-center gap-2">
-                              <span className={`text-[10px] px-2 py-1 rounded-full border ${pill.cls}`}>{pill.label}</span>
-                              <span className="text-[10px] text-slate-400">v1.0</span>
+                  <>
+                    <div className="text-[11px] text-slate-500">
+                      Showing {listTemplates.length} of {filteredTemplates.length}
+                    </div>
+                    <div className="max-h-[55vh] xl:max-h-[560px] overflow-auto pr-1 space-y-3">
+                      {listTemplates.map((t) => {
+                        const pill = statusPill(t.status);
+                        const active = selectedTemplate?.id === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => setSelectedTemplate(t)}
+                            className={`w-full text-left rounded-2xl border p-4 transition ${
+                              active ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center">
+                                {(t.contract_type || '').toLowerCase().includes('nda') ? (
+                                  <Shield className="w-5 h-5 text-slate-700" />
+                                ) : (
+                                  <FileText className="w-5 h-5 text-slate-700" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-slate-900 truncate">{t.name}</p>
+                                <p className="text-xs text-slate-500 mt-1 truncate">{t.description || 'Template'}</p>
+                                <div className="mt-2 flex items-center gap-2">
+                                  <span className={`text-[10px] px-2 py-1 rounded-full border ${pill.cls}`}>{pill.label}</span>
+                                </div>
+                              </div>
+                              {active && (
+                                <span className="w-5 h-5 rounded-full border-2 border-rose-400 bg-white flex items-center justify-center">
+                                  ✓
+                                </span>
+                              )}
                             </div>
-                          </div>
-                          {active && <span className="w-5 h-5 rounded-full border-2 border-rose-400 bg-white flex items-center justify-center">✓</span>}
-                        </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {filteredTemplates.length > LIST_LIMIT && (
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                        onClick={() => setShowAllList((v) => !v)}
+                      >
+                        {showAllList ? 'Show fewer templates' : `Show all templates (${filteredTemplates.length})`}
                       </button>
-                    );
-                  })
+                    )}
+                  </>
                 )}
               </div>
             </div>

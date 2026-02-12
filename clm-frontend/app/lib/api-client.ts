@@ -1604,9 +1604,7 @@ export class ApiClient {
 
   // ==================== FILE-BASED TEMPLATES (NO DB) ====================
   async listTemplateFiles(): Promise<ApiResponse<{ success: boolean; count: number; results: FileTemplateItem[] }>> {
-    return this.request('GET', `${ApiClient.API_V1_PREFIX}/templates/files/`, undefined, undefined, true, {
-      auth: false,
-    })
+    return this.request('GET', `${ApiClient.API_V1_PREFIX}/templates/files/`)
   }
 
   async createTemplateFile(params: { name?: string; filename?: string; description?: string; content: string }): Promise<ApiResponse<{ success: boolean; template: FileTemplateItem }>> {
@@ -1856,6 +1854,11 @@ export class ApiClient {
 
   async semanticSearch(query: string): Promise<ApiResponse> {
     return this.request('GET', `/api/search/semantic/?q=${encodeURIComponent(query)}`)
+  }
+
+  async semanticSearchWithParams(query: string, params?: Record<string, any>): Promise<ApiResponse> {
+    const qs = new URLSearchParams({ q: query, ...(params || {}) }).toString()
+    return this.request('GET', `/api/search/semantic/?${qs}`)
   }
 
   async advancedSearch(data: any): Promise<ApiResponse> {
