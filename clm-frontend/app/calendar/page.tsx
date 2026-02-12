@@ -4,13 +4,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import { ApiClient, CalendarEvent } from '../lib/api-client';
 import {
-  Bell,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Pencil,
   Plus,
-  Search,
   Trash2,
 } from 'lucide-react';
 
@@ -76,7 +74,6 @@ export default function CalendarPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
 
   const [contracts, setContracts] = useState<ContractOption[]>([]);
 
@@ -84,7 +81,7 @@ export default function CalendarPage() {
   const [formTitle, setFormTitle] = useState('');
   const [formSummary, setFormSummary] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [formCategory, setFormCategory] = useState<CalendarEvent['category']>('renewal');
+  const [formCategory, setFormCategory] = useState<CalendarEvent['category']>('meeting');
   const [formContractId, setFormContractId] = useState<string>('');
   const [formStart, setFormStart] = useState<string>(() => toISODateTimeLocal(new Date()));
   const [formEnd, setFormEnd] = useState<string>(() => {
@@ -125,33 +122,16 @@ export default function CalendarPage() {
   }, [monthRange.gridStart, monthRange.gridEnd]);
 
   const dayEvents = useMemo(() => {
-    const list = events.filter((e) => overlapsDay(e, selectedDay));
-    const s = search.trim().toLowerCase();
-    if (!s) return list;
-    return list.filter((e) =>
-      [e.title, e.summary, e.description, e.associated_contract_title].some((v) => (v || '').toLowerCase().includes(s))
-    );
-  }, [events, selectedDay, search]);
+    return events.filter((e) => overlapsDay(e, selectedDay));
+  }, [events, selectedDay]);
 
   const monthEventsFiltered = useMemo(() => {
-    const s = search.trim().toLowerCase();
     const list = events.filter((e) => {
       const d = parseISO(e.start_datetime);
       return d.getFullYear() === monthCursor.getFullYear() && d.getMonth() === monthCursor.getMonth();
     });
-    if (!s) return list;
-    return list.filter((e) =>
-      [e.title, e.summary, e.description, e.associated_contract_title].some((v) => (v || '').toLowerCase().includes(s))
-    );
-  }, [events, monthCursor, search]);
-
-  const upcomingRenewalsCount = useMemo(() => {
-    const now = new Date();
-    const in30 = new Date(now);
-    in30.setDate(in30.getDate() + 30);
-    return events.filter((e) => e.category === 'renewal' && parseISO(e.start_datetime) >= now && parseISO(e.start_datetime) <= in30)
-      .length;
-  }, [events]);
+    return list;
+  }, [events, monthCursor]);
 
   const loadMonth = async () => {
     setBusy(true);
@@ -203,7 +183,7 @@ export default function CalendarPage() {
     setFormTitle('');
     setFormSummary('');
     setFormDescription('');
-    setFormCategory('renewal');
+    setFormCategory('meeting');
     setFormContractId('');
     setFormStart(toISODateTimeLocal(start));
     setFormEnd(toISODateTimeLocal(end));
@@ -291,29 +271,6 @@ export default function CalendarPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-extrabold text-slate-900">Calendar &amp; Events</h1>
-            <span className="hidden md:inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
-              <span className="w-2 h-2 rounded-full bg-rose-400" />
-              Upcoming: {upcomingRenewalsCount} Renewals
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="relative w-full sm:w-[340px]">
-              <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search events..."
-                className="w-full bg-white border border-slate-200 rounded-full pl-10 pr-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-200"
-              />
-            </div>
-            <button
-              type="button"
-              aria-label="Notifications"
-              className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-white border border-slate-200 hover:bg-slate-50"
-            >
-              <Bell className="w-5 h-5 text-slate-700" />
-            </button>
           </div>
         </div>
 
@@ -499,7 +456,6 @@ export default function CalendarPage() {
                         .slice()
                         .sort((a, b) => a.start_datetime.localeCompare(b.start_datetime))
                         .map((ev) => {
-                          const c = colorForCategory(ev.category);
                           const d = parseISO(ev.start_datetime);
                           const t = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
                           return (
@@ -515,10 +471,6 @@ export default function CalendarPage() {
                                   <div className="text-xs text-slate-500">
                                     {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} • {t}
                                   </div>
-                                </div>
-                                <div className={`text-xs font-bold rounded-full border px-3 py-1 ${c.pill}`}
-                                >
-                                  {ev.category === 'renewal' ? 'Renewal' : ev.category === 'expiry' ? 'Expiry' : 'Meeting'}
                                 </div>
                               </div>
                             </button>
@@ -580,7 +532,6 @@ export default function CalendarPage() {
                   </div>
                   <div className="divide-y divide-slate-100 bg-white">
                     {dayEvents.slice(0, 5).map((ev) => {
-                      const c = colorForCategory(ev.category);
                       const s = parseISO(ev.start_datetime);
                       const e = parseISO(ev.end_datetime);
                       const label = `${s.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} - ${e.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
@@ -596,9 +547,6 @@ export default function CalendarPage() {
                             <div className="min-w-0">
                               <div className="text-sm font-extrabold text-slate-900 truncate">{ev.title}</div>
                               <div className="text-xs text-slate-500">{label}</div>
-                            </div>
-                            <div className={`text-[11px] font-bold rounded-full border px-3 py-1 ${c.pill}`}>
-                              {ev.category === 'renewal' ? 'Renewal' : ev.category === 'expiry' ? 'Expiry' : 'Meeting'}
                             </div>
                           </div>
                         </button>
@@ -659,28 +607,6 @@ export default function CalendarPage() {
                       ))}
                     </select>
                     <CalendarDays className="w-4 h-4 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[11px] font-bold text-slate-500 tracking-wide">CATEGORY</div>
-                  <div className="mt-2 grid grid-cols-3 gap-3">
-                    {(['renewal', 'expiry', 'meeting'] as CalendarEvent['category'][]).map((c) => {
-                      const styles = colorForCategory(c);
-                      const selected = formCategory === c;
-                      return (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setFormCategory(c)}
-                          className={`rounded-2xl border px-3 py-3 text-sm font-bold flex items-center justify-center ${
-                            selected ? styles.pill : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          {c === 'renewal' ? 'Renewal' : c === 'expiry' ? 'Expiry' : 'Meeting'}
-                        </button>
-                      );
-                    })}
                   </div>
                 </div>
 
