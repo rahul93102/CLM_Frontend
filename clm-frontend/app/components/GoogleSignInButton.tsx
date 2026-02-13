@@ -107,7 +107,24 @@ export default function GoogleSignInButton({ clientId, disabled, onCredential, o
     }
   }, [clientId, onCredential, onError])
 
-  const isDisabled = disabled || !clientId || !ready
+  if (!clientId) {
+    return (
+      <button
+        type="button"
+        disabled
+        className="w-[360px] max-w-full rounded-full border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-500"
+        title="Google sign-in is not configured on this environment"
+        aria-disabled="true"
+        onClick={() => {
+          onError?.('Google sign-in is not configured')
+        }}
+      >
+        Continue with Google
+      </button>
+    )
+  }
+
+  const isDisabled = disabled || !ready
 
   return (
     <div className={isDisabled ? 'opacity-60 pointer-events-none' : ''}>

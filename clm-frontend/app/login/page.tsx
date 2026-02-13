@@ -68,8 +68,18 @@ export default function LoginPage() {
           <div className="relative">
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300">
               <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M3 6.5l7 5 7-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M4 6h12a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M3 6.5l7 5 7-5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M4 6h12a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
               </svg>
             </div>
             <input
@@ -143,26 +153,28 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <div className="mt-6">
-        <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-gray-100" />
-          <div className="text-[10px] font-semibold tracking-widest text-gray-300">OR CONTINUE WITH</div>
-          <div className="h-px flex-1 bg-gray-100" />
-        </div>
+      {googleClientId && (
+        <div className="mt-6">
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-gray-100" />
+            <div className="text-[10px] font-semibold tracking-widest text-gray-300">OR CONTINUE WITH</div>
+            <div className="h-px flex-1 bg-gray-100" />
+          </div>
 
-        <div className="mt-4 flex justify-center">
-          <GoogleSignInButton
-            clientId={googleClientId}
-            disabled={isLoading}
-            onCredential={async (credential) => {
-              setLocalError('')
-              await loginWithGoogle(credential)
-              router.replace('/dashboard')
-            }}
-            onError={(msg) => setLocalError(msg)}
-          />
+          <div className="mt-4 flex justify-center">
+            <GoogleSignInButton
+              clientId={googleClientId}
+              disabled={isLoading}
+              onCredential={async (credential) => {
+                setLocalError('')
+                await loginWithGoogle(credential)
+                router.replace('/dashboard')
+              }}
+              onError={(msg) => setLocalError(msg)}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </AuthCardShell>
   )
 }

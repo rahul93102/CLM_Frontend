@@ -9,7 +9,7 @@
     "dev": "next dev --webpack",
     "build": "npx -y node@20 ./node_modules/next/dist/bin/next build --webpack --experimental-app-only",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",
