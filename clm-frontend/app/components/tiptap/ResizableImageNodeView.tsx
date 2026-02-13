@@ -28,17 +28,32 @@ function getAlignStyles(align: ImageAlign) {
 export default function ResizableImageNodeView(props: NodeViewProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const dragStateRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    startX: number;
+    startY: number;
+    containerRect: DOMRect;
+    selfRect: DOMRect;
+    raf: number | null;
+    nextX: number;
+    nextY: number;
+  } | null>(null);
 
   const attrs = props.node.attrs as {
     src?: string;
     alt?: string;
     title?: string;
     width?: string | null;
+    x?: number;
+    y?: number;
     align?: ImageAlign;
   };
 
   const align: ImageAlign = (attrs.align as ImageAlign) || 'center';
   const width = typeof attrs.width === 'string' ? attrs.width : null;
+  const x = typeof attrs.x === 'number' && Number.isFinite(attrs.x) ? attrs.x : 0;
+  const y = typeof attrs.y === 'number' && Number.isFinite(attrs.y) ? attrs.y : 0;
 
   const wrapperStyle = useMemo(() => {
     const base: React.CSSProperties = {
@@ -48,9 +63,11 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
       ...getAlignStyles(align),
       marginTop: '0.75rem',
       marginBottom: '0.75rem',
+      transform: x !== 0 || y !== 0 ? `translate(${Math.round(x)}px, ${Math.round(y)}px)` : undefined,
+      willChange: x !== 0 || y !== 0 ? 'transform' : undefined,
     };
     return base;
-  }, [align, width]);
+  }, [align, width, x, y]);
 
   const imgStyle = useMemo(() => {
     const base: React.CSSProperties = {
@@ -61,6 +78,88 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
     };
     return base;
   }, [width]);
+
+  const stopDrag = useCallback(() => {
+    const s = dragStateRef.current;
+    if (!s) return;
+    if (s.raf != null) cancelAnimationFrame(s.raf);
+    dragStateRef.current = null;
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+    window.removeEventListener('pointercancel', onPointerUp);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onPointerUp = useCallback(() => {
+    stopDrag();
+  }, [stopDrag]);
+
+  const onPointerMove = useCallback(
+    (ev: PointerEvent) => {
+      const s = dragStateRef.current;
+      if (!s) return;
+
+      const dx = ev.clientX - s.startClientX;
+      const dy = ev.clientY - s.startClientY;
+
+      // Clamp within the immediate editor/content container.
+      // The node view is translated, so approximate bounds based on original rects.
+      const maxX = Math.max(0, s.containerRect.width - s.selfRect.width);
+      const maxY = Math.max(0, s.containerRect.height - s.selfRect.height);
+
+      const unclampedX = s.startX + dx;
+      const unclampedY = s.startY + dy;
+
+      s.nextX = clamp(unclampedX, 0, maxX);
+      s.nextY = clamp(unclampedY, 0, maxY);
+
+      if (s.raf == null) {
+        s.raf = requestAnimationFrame(() => {
+          const cur = dragStateRef.current;
+          if (!cur) return;
+          cur.raf = null;
+          props.updateAttributes({ x: Math.round(cur.nextX), y: Math.round(cur.nextY) });
+        });
+      }
+    },
+    [props]
+  );
+
+  const startDrag = useCallback(
+    (e: React.PointerEvent) => {
+      if (!props.selected) return;
+      // Left click / primary only.
+      if (e.button !== 0) return;
+
+      const wrapperEl = wrapperRef.current;
+      if (!wrapperEl) return;
+      const containerEl = wrapperEl.parentElement;
+      if (!containerEl) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const containerRect = containerEl.getBoundingClientRect();
+      const selfRect = wrapperEl.getBoundingClientRect();
+
+      dragStateRef.current = {
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startX: x,
+        startY: y,
+        containerRect,
+        selfRect,
+        raf: null,
+        nextX: x,
+        nextY: y,
+      };
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+    },
+    [onPointerMove, onPointerUp, props.selected, x, y]
+  );
 
   const startResize = useCallback(
     (handle: ResizeHandle) =>
@@ -149,6 +248,8 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
       className="relative"
       data-align={align}
       data-width={width || undefined}
+      data-x={x || undefined}
+      data-y={y || undefined}
       style={wrapperStyle}
     >
       {/* Drag handle: lets users move the image within the document flow */}
@@ -169,7 +270,8 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
         alt={attrs.alt || ''}
         title={attrs.title || ''}
         style={imgStyle}
-        draggable={true}
+        draggable={false}
+        onPointerDown={startDrag}
       />
 
       {props.selected ? (

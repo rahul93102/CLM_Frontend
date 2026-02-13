@@ -12,7 +12,6 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@tailwindcss/postcss": "^4.1.18",
     "@tiptap/extension-color": "^3.17.1",
     "@tiptap/extension-font-family": "^3.17.1",
     "@tiptap/extension-highlight": "^3.17.1",

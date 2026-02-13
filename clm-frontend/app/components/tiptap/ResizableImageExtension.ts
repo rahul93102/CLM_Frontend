@@ -12,6 +12,30 @@ export const ResizableImageExtension = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
+      x: {
+        default: 0,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-x');
+          const n = raw == null ? 0 : Number(raw);
+          return Number.isFinite(n) ? n : 0;
+        },
+        renderHTML: (attributes) =>
+          typeof attributes.x === 'number' && attributes.x !== 0
+            ? { 'data-x': String(attributes.x) }
+            : {},
+      },
+      y: {
+        default: 0,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-y');
+          const n = raw == null ? 0 : Number(raw);
+          return Number.isFinite(n) ? n : 0;
+        },
+        renderHTML: (attributes) =>
+          typeof attributes.y === 'number' && attributes.y !== 0
+            ? { 'data-y': String(attributes.y) }
+            : {},
+      },
       width: {
         default: null,
         parseHTML: (element) => element.getAttribute('data-width') || null,
@@ -28,6 +52,8 @@ export const ResizableImageExtension = Image.extend({
   renderHTML({ HTMLAttributes }) {
     const align = (HTMLAttributes as { align?: ImageAlign })?.align;
     const width = (HTMLAttributes as { width?: string })?.width;
+    const x = (HTMLAttributes as { x?: number })?.x;
+    const y = (HTMLAttributes as { y?: number })?.y;
 
     const baseStyleParts: string[] = ['max-width: 100%', 'height: auto', 'display: block'];
     if (width) baseStyleParts.push(`width: ${width}`);
@@ -40,6 +66,12 @@ export const ResizableImageExtension = Image.extend({
 
     // Keep vertical rhythm
     baseStyleParts.push('margin-top: 0.75rem', 'margin-bottom: 0.75rem');
+
+    // Optional positional offset (used by our drag UX).
+    if (typeof x === 'number' && typeof y === 'number' && (x !== 0 || y !== 0)) {
+      baseStyleParts.push(`transform: translate(${Math.round(x)}px, ${Math.round(y)}px)`);
+      baseStyleParts.push('will-change: transform');
+    }
 
     const style = baseStyleParts.join('; ');
 
