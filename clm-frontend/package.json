@@ -2,12 +2,15 @@
   "name": "clm-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "postinstall": "node scripts/copy-pdfjs-assets.mjs",
     "predev": "node scripts/copy-pdfjs-assets.mjs",
     "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "dev": "next dev --webpack",
-    "build": "npx -y node@20 ./node_modules/next/dist/bin/next build --webpack --experimental-app-only",
+    "build": "next build",
     "build:pages": "STATIC_EXPORT=1 npm run build",
     "start": "next start",
     "lint": "eslint ."
