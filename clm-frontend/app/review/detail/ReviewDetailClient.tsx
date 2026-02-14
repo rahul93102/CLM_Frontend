@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '../../components/DashboardLayout';
 import { ApiClient, ReviewContractDetail, ReviewContractStatus } from '../../lib/api-client';
 import {
@@ -61,8 +61,8 @@ const Chip = ({
 
 export default function ReviewDetailPage() {
   const router = useRouter();
-  const params = useParams<{ id: string }>();
-  const id = params?.id;
+  const searchParams = useSearchParams();
+  const id = searchParams?.get('id') || '';
 
   const downloadRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,6 +114,11 @@ export default function ReviewDetailPage() {
   };
 
   useEffect(() => {
+    if (!id) {
+      setLoading(false);
+      setError('Missing review id');
+      return;
+    }
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);

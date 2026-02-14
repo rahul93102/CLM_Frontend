@@ -632,7 +632,7 @@ const CreateContractInner = () => {
         clearAiDraft(selectedTemplate);
         setAiDraftUpdatedAt(null);
       }
-      router.push(`/contracts/${id}`);
+      router.push(`/contracts/editor?id=${encodeURIComponent(id)}`);
     } catch (e) {
       setAiError(e instanceof Error ? e.message : 'Failed to create draft');
     } finally {
@@ -782,7 +782,7 @@ const CreateContractInner = () => {
         clearTemplateDraft(selectedTemplate);
         setTemplateDraftRestored(false);
         setTemplateDraftUpdatedAt(null);
-        router.push(`/contracts/${contractId}`);
+        router.push(`/contracts/editor?id=${encodeURIComponent(String(contractId))}`);
       } else {
         router.push('/contracts');
       }

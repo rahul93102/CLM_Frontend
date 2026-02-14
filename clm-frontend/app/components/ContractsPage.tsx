@@ -208,7 +208,7 @@ export default function ContractsPage() {
                 {contracts.map((contract) => (
                   <tr key={contract.id} className="border-b border-gray-200 hover:bg-gray-50 transition">
                     <td className="px-6 py-4">
-                      <Link href={`/contracts/${contract.id}`} className="text-purple-600 hover:text-purple-700 font-medium">
+                      <Link href={`/contracts/editor?id=${encodeURIComponent(contract.id)}`} className="text-purple-600 hover:text-purple-700 font-medium">
                         {contract.title}
                       </Link>
                     </td>

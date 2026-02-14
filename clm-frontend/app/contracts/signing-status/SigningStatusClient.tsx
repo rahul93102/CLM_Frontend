@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Clock3, Copy, XCircle } from 'lucide-react';
-import DashboardLayout from '../../../components/DashboardLayout';
-import { ApiClient } from '../../../lib/api-client';
+import DashboardLayout from '../../components/DashboardLayout';
+import { ApiClient } from '../../lib/api-client';
 
 type StepKey = 'invite_sent' | 'recipient_received' | 'signature_pending' | 'completed';
 
@@ -303,9 +303,9 @@ function TrackingStepperMobile(props: {
 }
 
 export default function SigningStatusPage() {
-	const params = useParams<{ id: string }>();
 	const router = useRouter();
-	const contractId = params?.id;
+	const searchParams = useSearchParams();
+	const contractId = searchParams?.get('id') || '';
 
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -574,7 +574,7 @@ export default function SigningStatusPage() {
 					) : null}
 					<button
 						type="button"
-						onClick={() => router.push(`/contracts/${contractId}`)}
+						onClick={() => router.push(`/contracts/editor?id=${encodeURIComponent(contractId)}`)}
 						className="col-span-1 h-9 sm:h-10 px-3 sm:px-4 rounded-full bg-white border border-slate-200 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50"
 					>
 						Back

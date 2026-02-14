@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/react';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from './DashboardLayout';
 import RichTextEditor from './RichTextEditor';
 import { ApiClient, Contract } from '@/app/lib/api-client';
@@ -33,9 +33,9 @@ type GenerationContext = {
 };
 
 const ContractEditorPageV2: React.FC = () => {
-  const params = useParams<{ id: string }>();
   const router = useRouter();
-  const contractId = params?.id;
+  const searchParams = useSearchParams();
+  const contractId = searchParams?.get('id') || '';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -255,7 +255,11 @@ const ContractEditorPageV2: React.FC = () => {
     let alive = true;
 
     async function load() {
-      if (!contractId) return;
+      if (!contractId) {
+        setLoading(false);
+        setError('Missing contract id');
+        return;
+      }
       try {
         setLoading(true);
         setError(null);
@@ -893,7 +897,7 @@ const ContractEditorPageV2: React.FC = () => {
 
         // Move user to the dedicated progress page right away.
         setSignOpen(false);
-        router.push(`/contracts/${contractId}/signing-status`);
+        router.push(`/contracts/signing-status?id=${encodeURIComponent(contractId)}`);
     } catch (e) {
       setSignError(e instanceof Error ? e.message : 'Failed to start signing');
     } finally {
@@ -946,7 +950,7 @@ const ContractEditorPageV2: React.FC = () => {
 
         // Move user to the dedicated progress page right away.
         setSignOpen(false);
-        router.push(`/contracts/${pending.contract_id}/signing-status`);
+        router.push(`/contracts/signing-status?id=${encodeURIComponent(pending.contract_id)}`);
     } finally {
       setSigning(false);
     }

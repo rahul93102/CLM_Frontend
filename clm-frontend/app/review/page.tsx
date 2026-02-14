@@ -471,7 +471,7 @@ export default function ReviewPage() {
                       <td className="py-4 pr-4">
                         <button
                           type="button"
-                          onClick={() => router.push(`/review/${it.id}`)}
+                          onClick={() => router.push(`/review/detail?id=${encodeURIComponent(it.id)}`)}
                           className="text-left"
                         >
                           <div className="font-semibold text-slate-900">{it.title || it.original_filename}</div>
@@ -493,7 +493,7 @@ export default function ReviewPage() {
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => router.push(`/review/${it.id}`)}
+                            onClick={() => router.push(`/review/detail?id=${encodeURIComponent(it.id)}`)}
                             className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 inline-flex items-center justify-center"
                             title="Open review"
                           >

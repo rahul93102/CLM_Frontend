@@ -193,7 +193,7 @@ const ContractsPageV2: React.FC = () => {
             visibleContracts.map((contract: any) => (
               <button
                 key={contract.id}
-                onClick={() => router.push(`/contracts/${contract.id}`)}
+                onClick={() => router.push(`/contracts/editor?id=${encodeURIComponent(contract.id)}`)}
                 className="w-full text-left px-6 py-5 hover:bg-slate-50 transition"
               >
                 <div className="flex items-center justify-between gap-4">

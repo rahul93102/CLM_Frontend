@@ -248,7 +248,7 @@ const ApprovalsPageV2: React.FC = () => {
                         className="px-4 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-white"
                         onClick={() => {
                           if ((a.entityType || '').toLowerCase().includes('contract')) {
-                            window.location.href = `/contracts/${a.entityId}`;
+                            window.location.href = `/contracts/editor?id=${encodeURIComponent(a.entityId)}`;
                           }
                         }}
                       >

@@ -244,7 +244,7 @@ const SigningRequestsPageV2: React.FC = () => {
                         </button>
 
                         <button
-                          onClick={() => router.push(`/contracts/${it.contract_id}/signing-status`)}
+                          onClick={() => router.push(`/contracts/signing-status?id=${encodeURIComponent(it.contract_id)}`)}
                           className="inline-flex items-center gap-2 rounded-full bg-[#0F141F] text-white px-4 py-2 text-xs font-semibold"
                         >
                           Open <ArrowRight className="w-4 h-4" />
