@@ -18,6 +18,7 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [localError, setLocalError] = useState('')
   const [passwordStrength, setPasswordStrength] = useState(0)
+  const [googleBusy, setGoogleBusy] = useState(false)
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -103,6 +104,7 @@ export default function RegisterPage() {
   }
 
   const displayError = localError || error
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
   const strengthColor =
     passwordStrength === 0
       ? 'bg-gray-300'
@@ -124,8 +126,6 @@ export default function RegisterPage() {
           : passwordStrength === 3
             ? 'Good'
             : 'Strong'
-
-  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
 
   return (
     <AuthCardShell title="Create Account" subtitle="Create your account and verify OTP to activate" activeTab="register">
@@ -294,15 +294,27 @@ export default function RegisterPage() {
         <div className="mt-4 flex justify-center">
           <GoogleSignInButton
             clientId={googleClientId}
-            disabled={isLoading}
+            disabled={isLoading || googleBusy}
             onCredential={async (credential) => {
               setLocalError('')
-              await loginWithGoogle(credential)
-              router.replace('/dashboard')
+              setGoogleBusy(true)
+              try {
+                await loginWithGoogle(credential)
+                router.replace('/dashboard')
+              } finally {
+                setGoogleBusy(false)
+              }
             }}
             onError={(msg) => setLocalError(msg)}
           />
         </div>
+
+        {googleBusy && (
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
+            <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
+            Authenticating with Google…
+          </div>
+        )}
       </div>
     </AuthCardShell>
   )

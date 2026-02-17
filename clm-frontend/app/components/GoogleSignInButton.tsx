@@ -137,7 +137,18 @@ export default function GoogleSignInButton({ clientId, disabled, onCredential, o
 
   return (
     <div className={`w-full flex justify-center ${isDisabled ? 'opacity-60 pointer-events-none' : ''}`}>
-      <div ref={buttonDivRef} className="w-full" />
+      <div className="relative w-full" style={{ minHeight: 44 }}>
+        <div ref={buttonDivRef} className="w-full" />
+
+        {!ready && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-5 py-2.5 text-sm text-gray-600 shadow-sm">
+              <span className="inline-block h-4 w-4 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
+              Loading Google…
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

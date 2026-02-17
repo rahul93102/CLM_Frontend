@@ -33,8 +33,6 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
     startClientY: number;
     startX: number;
     startY: number;
-    containerRect: DOMRect;
-    selfRect: DOMRect;
     raf: number | null;
     nextX: number;
     nextY: number;
@@ -79,6 +77,44 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
     return base;
   }, [width]);
 
+  const onPointerMove = useCallback(
+    (ev: PointerEvent) => {
+      const s = dragStateRef.current;
+      if (!s) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      const dx = ev.clientX - s.startClientX;
+      const dy = ev.clientY - s.startClientY;
+
+      const unclampedX = s.startX + dx;
+      const unclampedY = s.startY + dy;
+
+      // Allow free movement in all directions.
+      // We still keep a generous cap to avoid runaway transforms.
+      const LIMIT = 5000;
+
+      s.nextX = clamp(unclampedX, -LIMIT, LIMIT);
+      s.nextY = clamp(unclampedY, -LIMIT, LIMIT);
+
+      if (s.raf == null) {
+        s.raf = requestAnimationFrame(() => {
+          const cur = dragStateRef.current;
+          if (!cur) return;
+          cur.raf = null;
+
+          const el = wrapperRef.current;
+          if (!el) return;
+          // Smooth DOM update (no editor transaction per frame).
+          el.style.transform = `translate(${Math.round(cur.nextX)}px, ${Math.round(cur.nextY)}px)`;
+          el.style.willChange = 'transform';
+        });
+      }
+    },
+    []
+  );
+
   const stopDrag = useCallback(() => {
     const s = dragStateRef.current;
     if (!s) return;
@@ -87,78 +123,69 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('pointercancel', onPointerUp);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onPointerMove]);
 
-  const onPointerUp = useCallback(() => {
-    stopDrag();
-  }, [stopDrag]);
-
-  const onPointerMove = useCallback(
-    (ev: PointerEvent) => {
+  const onPointerUp = useCallback(
+    (ev?: PointerEvent) => {
       const s = dragStateRef.current;
-      if (!s) return;
+      if (s) {
+        try {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+        } catch {
+          // ignore
+        }
 
-      const dx = ev.clientX - s.startClientX;
-      const dy = ev.clientY - s.startClientY;
-
-      // Clamp within the immediate editor/content container.
-      // The node view is translated, so approximate bounds based on original rects.
-      const maxX = Math.max(0, s.containerRect.width - s.selfRect.width);
-      const maxY = Math.max(0, s.containerRect.height - s.selfRect.height);
-
-      const unclampedX = s.startX + dx;
-      const unclampedY = s.startY + dy;
-
-      s.nextX = clamp(unclampedX, 0, maxX);
-      s.nextY = clamp(unclampedY, 0, maxY);
-
-      if (s.raf == null) {
-        s.raf = requestAnimationFrame(() => {
-          const cur = dragStateRef.current;
-          if (!cur) return;
-          cur.raf = null;
-          props.updateAttributes({ x: Math.round(cur.nextX), y: Math.round(cur.nextY) });
-        });
+        const nextX = Math.round(s.nextX);
+        const nextY = Math.round(s.nextY);
+        // Commit once to the document so the position persists.
+        props.updateAttributes({ x: nextX, y: nextY });
       }
+      stopDrag();
     },
-    [props]
+    [props, stopDrag]
   );
 
   const startDrag = useCallback(
     (e: React.PointerEvent) => {
-      if (!props.selected) return;
       // Left click / primary only.
       if (e.button !== 0) return;
 
       const wrapperEl = wrapperRef.current;
       if (!wrapperEl) return;
-      const containerEl = wrapperEl.parentElement;
-      if (!containerEl) return;
+
+      // Ensure the node is selected when starting a drag.
+      try {
+        const pos = typeof props.getPos === 'function' ? props.getPos() : null;
+        if (typeof pos === 'number') props.editor.commands.setNodeSelection(pos);
+      } catch {
+        // ignore
+      }
 
       e.preventDefault();
       e.stopPropagation();
-
-      const containerRect = containerEl.getBoundingClientRect();
-      const selfRect = wrapperEl.getBoundingClientRect();
 
       dragStateRef.current = {
         startClientX: e.clientX,
         startClientY: e.clientY,
         startX: x,
         startY: y,
-        containerRect,
-        selfRect,
         raf: null,
         nextX: x,
         nextY: y,
       };
 
-      window.addEventListener('pointermove', onPointerMove);
-      window.addEventListener('pointerup', onPointerUp);
-      window.addEventListener('pointercancel', onPointerUp);
+      window.addEventListener('pointermove', onPointerMove, { passive: false });
+      window.addEventListener('pointerup', onPointerUp, { passive: false });
+      window.addEventListener('pointercancel', onPointerUp, { passive: false });
+
+      try {
+        (e.currentTarget as Element | null)?.setPointerCapture?.(e.pointerId);
+      } catch {
+        // ignore
+      }
     },
-    [onPointerMove, onPointerUp, props.selected, x, y]
+    [onPointerMove, onPointerUp, props.editor, props.getPos, x, y]
   );
 
   const startResize = useCallback(
@@ -253,16 +280,17 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
       style={wrapperStyle}
     >
       {/* Drag handle: lets users move the image within the document flow */}
-      {props.selected ? (
-        <div
-          data-drag-handle
-          contentEditable={false}
-          className="absolute -left-3 -top-3 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center cursor-grab"
-          title="Drag to move"
-        >
-          <div className="w-3 h-3 rounded bg-slate-300" />
-        </div>
-      ) : null}
+      <div
+        data-drag-handle
+        contentEditable={false}
+        className={`absolute left-2 top-2 w-8 h-8 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center cursor-grab active:cursor-grabbing select-none touch-none transition ${
+          props.selected ? 'opacity-100' : 'opacity-60 hover:opacity-100'
+        }`}
+        title="Drag to move"
+        onPointerDown={startDrag}
+      >
+        <div className="w-4 h-4 rounded bg-slate-300" />
+      </div>
 
       <img
         ref={imgRef}
@@ -271,7 +299,10 @@ export default function ResizableImageNodeView(props: NodeViewProps) {
         title={attrs.title || ''}
         style={imgStyle}
         draggable={false}
-        onPointerDown={startDrag}
+        onDragStart={(e) => {
+          // Prevent browser native drag image.
+          e.preventDefault();
+        }}
       />
 
       {props.selected ? (

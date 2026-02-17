@@ -134,6 +134,17 @@ const CreateContractInner = () => {
   const aiEditorApiRef = useRef<Editor | null>(null);
   const aiAutoStartTemplateRef = useRef<string>('');
 
+  const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
+  const aiChatScrollRef = useRef<HTMLDivElement | null>(null);
+  const aiChatStickToBottomRef = useRef(true);
+  const aiActiveAssistantMsgIdRef = useRef<string>('');
+
+  const scrollAiChatToBottom = () => {
+    const el = aiChatScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  };
+
   type AiDraft = {
     template: string;
     title: string;
@@ -142,12 +153,22 @@ const CreateContractInner = () => {
     updatedAt: number;
   };
 
+  type AiMessageRole = 'user' | 'assistant' | 'system';
+  type AiMessage = {
+    id: string;
+    role: AiMessageRole;
+    content: string;
+    createdAt: number;
+  };
+
   const userDraftKey = useMemo(() => {
     const u: any = user as any;
     return String(u?.user_id || u?.id || u?.email || 'anon');
   }, [user]);
 
   const getAiDraftStorageKey = (templateFilename: string) => `clm:aiBuilderDraft:v1:${userDraftKey}:${templateFilename}`;
+
+  const getAiChatStorageKey = (templateFilename: string) => `clm:aiBuilderChat:v1:${userDraftKey}:${templateFilename}`;
 
   const getTemplateDraftStorageKey = (templateFilename: string) =>
     `clm:templateGeneratorDraft:v1:${userDraftKey}:${templateFilename}`;
@@ -228,6 +249,49 @@ const CreateContractInner = () => {
       localStorage.removeItem(getAiDraftStorageKey(templateFilename));
     } catch {
       // Ignore.
+    }
+  };
+
+  const readAiChat = (templateFilename: string): AiMessage[] => {
+    try {
+      const raw = localStorage.getItem(getAiChatStorageKey(templateFilename));
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((m: any) => ({
+          id: String(m?.id || ''),
+          role: (m?.role as AiMessageRole) || 'user',
+          content: String(m?.content || ''),
+          createdAt: Number(m?.createdAt || 0),
+        }))
+        .filter((m: AiMessage) => !!m.id && !!m.role);
+    } catch {
+      return [];
+    }
+  };
+
+  const writeAiChat = (templateFilename: string, messages: AiMessage[]) => {
+    try {
+      localStorage.setItem(getAiChatStorageKey(templateFilename), JSON.stringify(messages));
+    } catch {
+      // Ignore storage quota/availability issues.
+    }
+  };
+
+  const clearAiChat = (templateFilename: string) => {
+    try {
+      localStorage.removeItem(getAiChatStorageKey(templateFilename));
+    } catch {
+      // Ignore.
+    }
+  };
+
+  const newMessageId = () => {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
   };
 
@@ -400,6 +464,36 @@ const CreateContractInner = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, selectedTemplate, userDraftKey]);
 
+  // Restore AI Builder chat history per template.
+  useEffect(() => {
+    if (mode !== 'ai') return;
+    if (!selectedTemplate) {
+      setAiMessages([]);
+      return;
+    }
+    setAiMessages(readAiChat(selectedTemplate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedTemplate, userDraftKey]);
+
+  // Auto-save AI Builder chat history locally.
+  useEffect(() => {
+    if (mode !== 'ai') return;
+    if (!selectedTemplate) return;
+    const t = window.setTimeout(() => {
+      writeAiChat(selectedTemplate, aiMessages);
+    }, 250);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedTemplate, aiMessages]);
+
+  // Keep chat pinned to bottom while user hasn't scrolled up.
+  useEffect(() => {
+    if (mode !== 'ai') return;
+    if (!aiChatStickToBottomRef.current) return;
+    scrollAiChatToBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, aiMessages.length]);
+
   // Auto-resume saved AI Builder drafts (and optionally auto-start from query params).
   useEffect(() => {
     if (mode !== 'ai') return;
@@ -521,30 +615,77 @@ const CreateContractInner = () => {
       let nextText = '';
       setAiSuggestionText('');
 
+      const userMsg: AiMessage = {
+        id: newMessageId(),
+        role: 'user',
+        content: prompt,
+        createdAt: Date.now(),
+      };
+      const assistantMsgId = newMessageId();
+      aiActiveAssistantMsgIdRef.current = assistantMsgId;
+      const assistantMsg: AiMessage = {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+      };
+      setAiMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setAiPrompt('');
+
       const client = new ApiClient();
       await client.streamTemplateAiGenerate(
         {
           prompt,
           current_text: current,
           contract_type: schema?.template_type || selectedTemplateObj?.contract_type,
+          messages: [...aiMessages, userMsg]
+            .filter((m) => (m?.content || '').trim().length > 0)
+            .slice(-24)
+            .map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
         },
         {
           signal: aborter.signal,
           onDelta: (delta) => {
             nextText += delta;
             setAiSuggestionText(nextText);
+            const id = aiActiveAssistantMsgIdRef.current;
+            if (id) {
+              setAiMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: nextText } : m)));
+            }
           },
           onDone: () => {
             setAiSuggestionText(nextText);
+            const id = aiActiveAssistantMsgIdRef.current;
+            if (id) {
+              setAiMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: nextText } : m)));
+            }
           },
           onError: (err) => {
             setAiError(err || 'AI generation failed');
+            const msg: AiMessage = {
+              id: newMessageId(),
+              role: 'system',
+              content: err || 'AI generation failed',
+              createdAt: Date.now(),
+            };
+            setAiMessages((prev) => [...prev, msg]);
           },
         }
       );
     } catch (e) {
       if ((e as any)?.name === 'AbortError') return;
       setAiError(e instanceof Error ? e.message : 'AI generation failed');
+
+      const msg: AiMessage = {
+        id: newMessageId(),
+        role: 'system',
+        content: e instanceof Error ? e.message : 'AI generation failed',
+        createdAt: Date.now(),
+      };
+      setAiMessages((prev) => [...prev, msg]);
     } finally {
       setAiGenerating(false);
     }
@@ -1039,8 +1180,8 @@ const CreateContractInner = () => {
                     </section>
 
                     {/* AI Suggestions */}
-                    <aside className="col-span-12 lg:col-span-4 space-y-6">
-                      <div className="bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden">
+                    <aside className="col-span-12 lg:col-span-4 space-y-6 lg:sticky lg:top-6 self-start">
+                      <div className="bg-white rounded-[28px] border border-black/5 shadow-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)]">
                         <div className="px-6 pt-6 pb-4 border-b border-black/5">
                           <div className="flex items-center justify-between">
                             <p className="text-sm font-semibold text-[#111827]">AI Suggestions</p>
@@ -1051,7 +1192,98 @@ const CreateContractInner = () => {
                           </p>
                         </div>
 
-                        <div className="p-5">
+                        <div className="p-5 flex flex-col flex-1 min-h-0">
+                          {/* Chat-style prompt/response history (persisted per template) */}
+                          <div className="mb-4 rounded-2xl border border-black/10 bg-white overflow-hidden flex flex-col flex-1 min-h-0">
+                            <div className="px-4 py-3 border-b border-black/5 flex items-center justify-between gap-3">
+                              <div className="text-xs font-semibold text-[#111827]">History</div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={scrollAiChatToBottom}
+                                  className="text-[11px] font-semibold text-[#0F141F] hover:underline"
+                                >
+                                  Latest
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!selectedTemplate) return;
+                                    clearAiChat(selectedTemplate);
+                                    setAiMessages([]);
+                                  }}
+                                  className="text-[11px] font-semibold text-[#FF5C7A] hover:underline"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
+
+                            <div
+                              ref={aiChatScrollRef}
+                              onScroll={(e) => {
+                                const el = e.currentTarget;
+                                const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                                aiChatStickToBottomRef.current = distanceFromBottom < 32;
+                              }}
+                              className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
+                            >
+                              {aiMessages.length === 0 ? (
+                                <div className="text-sm text-[#6B7280]">Your prompts and AI responses will appear here.</div>
+                              ) : (
+                                aiMessages.map((m) => {
+                                  const isUser = m.role === 'user';
+                                  const isAssistant = m.role === 'assistant';
+                                  const pill = isUser ? 'You' : isAssistant ? 'AI' : 'System';
+                                  const pillClass = isUser
+                                    ? 'bg-[#0F141F] text-white'
+                                    : isAssistant
+                                      ? 'bg-[#FF5C7A] text-white'
+                                      : 'bg-slate-100 text-slate-700';
+
+                                  return (
+                                    <div key={m.id} className={isUser ? 'text-right' : 'text-left'}>
+                                      <div className="flex items-center justify-between gap-2 mb-1">
+                                        <span
+                                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${pillClass}`}
+                                        >
+                                          {pill}
+                                        </span>
+                                        <span className="text-[11px] text-black/35">
+                                          {m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : ''}
+                                        </span>
+                                      </div>
+                                      <div
+                                        className={`inline-block max-w-[95%] rounded-2xl border px-3 py-2 text-xs whitespace-pre-wrap break-words ${
+                                          isUser
+                                            ? 'bg-[#F6F3ED] border-black/10 text-[#111827]'
+                                            : isAssistant
+                                              ? 'bg-white border-black/10 text-[#111827]'
+                                              : 'bg-rose-50 border-rose-200 text-rose-700'
+                                        }`}
+                                      >
+                                        {m.content || (m.role === 'assistant' && aiGenerating ? '…' : '')}
+                                      </div>
+
+                                      {isUser ? (
+                                        <div className="mt-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => setAiPrompt(m.content)}
+                                            className="text-[11px] text-black/45 hover:underline"
+                                          >
+                                            Reuse
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="mt-auto">
                           <textarea
                             value={aiPrompt}
                             onChange={(e) => setAiPrompt(e.target.value)}
@@ -1078,48 +1310,28 @@ const CreateContractInner = () => {
                                 Stop
                               </button>
                             ) : null}
+
+                            <button
+                              type="button"
+                              onClick={acceptAiSuggestion}
+                              disabled={!aiSuggestionText.trim() || aiGenerating}
+                              className="h-10 w-full sm:w-auto px-4 rounded-full bg-[#FF5C7A] text-white text-sm font-semibold disabled:opacity-60"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              type="button"
+                              onClick={rejectAiSuggestion}
+                              disabled={!aiSuggestionText.trim() || aiGenerating}
+                              className="h-10 w-full sm:w-auto px-4 rounded-full bg-white border border-black/10 text-sm font-semibold text-[#111827] hover:bg-black/5 disabled:opacity-60"
+                            >
+                              Reject
+                            </button>
                           </div>
 
                           {aiError ? <div className="mt-3 text-xs text-rose-600">{aiError}</div> : null}
 
                           <div className="mt-4 text-xs text-black/45">Tip: be specific (sections, numbers, jurisdictions).</div>
-
-                          {/* Proposed revision */}
-                          <div className="mt-5 rounded-2xl border border-black/10 bg-white overflow-hidden">
-                            <div className="px-4 py-3 border-b border-black/5 flex items-center justify-between">
-                              <div className="text-xs font-semibold text-[#111827]">Proposed Revision</div>
-                              <div className="text-[11px] text-black/45">
-                                {aiSuggestionText.trim() ? 'Ready' : 'None yet'}
-                              </div>
-                            </div>
-                            <div className="p-4">
-                              {!aiSuggestionText.trim() ? (
-                                <div className="text-sm text-[#6B7280]">Run a prompt to generate suggestions.</div>
-                              ) : (
-                                <div className="text-xs text-slate-800 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                                  {aiSuggestionText}
-                                </div>
-                              )}
-
-                              <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={acceptAiSuggestion}
-                                  disabled={!aiSuggestionText.trim() || aiGenerating}
-                                  className="h-10 w-full sm:w-auto px-4 rounded-full bg-[#FF5C7A] text-white text-sm font-semibold disabled:opacity-60"
-                                >
-                                  Accept
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={rejectAiSuggestion}
-                                  disabled={!aiSuggestionText.trim() || aiGenerating}
-                                  className="h-10 w-full sm:w-auto px-4 rounded-full bg-white border border-black/10 text-sm font-semibold text-[#111827] hover:bg-black/5 disabled:opacity-60"
-                                >
-                                  Reject
-                                </button>
-                              </div>
-                            </div>
                           </div>
                         </div>
                       </div>

@@ -7,7 +7,9 @@ import ResizableImageNodeView from './ResizableImageNodeView';
 export type ImageAlign = 'left' | 'center' | 'right';
 
 export const ResizableImageExtension = Image.extend({
-  draggable: true,
+  // We implement our own drag UX (x/y translate) via a handle in the NodeView.
+  // Leaving ProseMirror's native node dragging enabled makes pointer interactions flaky.
+  draggable: false,
 
   addAttributes() {
     return {

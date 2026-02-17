@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
+import { API_BASE_URL as ROOT_API_BASE_URL } from '@/app/lib/env'
 
 type IconProps = React.SVGProps<SVGSVGElement> & { title?: string }
 
@@ -72,7 +73,7 @@ interface TemplateTypesResponse {
 // CONSTANTS
 // ============================================================================
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
+const API_BASE_URL = `${ROOT_API_BASE_URL}/api/v1`
 
 const TEMPLATE_ICONS: Record<string, React.ReactNode> = {
   NDA: <IconShield className="w-6 h-6" />,

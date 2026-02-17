@@ -14,6 +14,7 @@ import {
   Link2,
   List,
   ListOrdered,
+  PenLine,
   Redo2,
   Strikethrough,
   Subscript as SubscriptIcon,
@@ -40,6 +41,7 @@ import Superscript from '@tiptap/extension-superscript';
 
 import { FontSizeExtension } from './tiptap/FontSizeExtension';
 import { ResizableImageExtension, type ImageAlign } from './tiptap/ResizableImageExtension';
+import SignatureModal from './SignatureModal';
 
 type Props = {
   valueHtml: string;
@@ -91,6 +93,7 @@ export default function RichTextEditor({
   const [imageOpen, setImageOpen] = useState(false);
   const imageFileRef = useRef<HTMLInputElement | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [signatureOpen, setSignatureOpen] = useState(false);
 
   const extensions = useMemo(
     () => [
@@ -267,6 +270,39 @@ export default function RichTextEditor({
     setImageOpen(false);
   };
 
+  const insertSignatureImage = (payload: { name: string; dataUrl: string }) => {
+    if (!editor) return;
+    const alt = payload.name ? `Signature of ${payload.name}` : 'Signature';
+
+    // Insert as a node with attrs in one go (more reliable than chaining follow-up commands).
+    const ok = editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: 'image',
+        attrs: {
+          src: payload.dataUrl,
+          alt,
+          title: alt,
+          width: '35%',
+          align: 'left',
+          x: 0,
+          y: 0,
+        },
+      })
+      .run();
+
+    if (ok) {
+      editor.chain().focus().insertContent('<p></p>').run();
+      return;
+    }
+
+    // Fallback (defensive): try the classic command path.
+    editor.chain().focus().setImage({ src: payload.dataUrl, alt, title: alt }).run();
+    editor.chain().focus().setImageWidth('35%').setImageAlign('left').run();
+    editor.chain().focus().insertContent('<p></p>').run();
+  };
+
   const isImageActive = !!editor?.isActive('image');
   const imageAttrs = (editor?.getAttributes('image') || {}) as TiptapImageAttrs;
   const currentImageAlign = imageAttrs.align;
@@ -408,9 +444,24 @@ export default function RichTextEditor({
               if (disabledUi) return;
               setImageOpen((v) => !v);
               setLinkOpen(false);
+              setSignatureOpen(false);
             }}
           >
             <ImagePlus className="w-4 h-4" />
+          </ToolbarIconButton>
+
+          <ToolbarIconButton
+            label="Add signature"
+            disabled={disabledUi}
+            onClick={() => {
+              if (disabledUi) return;
+              setSignatureOpen(true);
+              setLinkOpen(false);
+              setImageOpen(false);
+              setMoreOpen(false);
+            }}
+          >
+            <PenLine className="w-4 h-4" />
           </ToolbarIconButton>
 
           <ToolbarIconButton label="Insert {{ }} placeholder" disabled={disabledUi} onClick={insertPlaceholder}>
@@ -762,6 +813,13 @@ export default function RichTextEditor({
       <div className={contentWrapperClassName || 'p-4 bg-[#F6F3ED]'}>
         <EditorContent editor={editor} />
       </div>
+
+      <SignatureModal
+        open={signatureOpen}
+        onClose={() => setSignatureOpen(false)}
+        onApply={insertSignatureImage}
+        storageKey="clm:signatureModal:contractEditor:v1"
+      />
     </div>
   );
 }

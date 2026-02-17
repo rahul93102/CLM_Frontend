@@ -1041,7 +1041,14 @@ export class ApiClient {
   }
 
   async streamTemplateAiGenerate(
-    payload: { prompt: string; current_text: string; contract_type?: string; mode?: AiMode; jurisdiction?: string },
+    payload: {
+      prompt: string
+      current_text: string
+      contract_type?: string
+      mode?: AiMode
+      jurisdiction?: string
+      messages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
+    },
     handlers: {
       onDelta: (delta: string) => void
       onContext?: (ctx: AiContextEvent) => void

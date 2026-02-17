@@ -4,7 +4,7 @@
  * Cloudflare Pages / Next.js will inline NEXT_PUBLIC_* variables at build time.
  */
 
-const DEFAULT_API_BASE_URL = 'https://lawflow-267708864896.asia-south1.run.app'
+const DEFAULT_API_BASE_URL = 'http://localhost:8000'
 
 function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '')

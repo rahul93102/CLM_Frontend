@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
+import { API_BASE_URL } from '@/app/lib/env'
 
 // Type definitions
 interface Statistics {
@@ -34,7 +35,7 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   
   // Base URL (no trailing /api). Endpoints are under /api/v1
-  const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+  const BASE_URL = API_BASE_URL;
   
   // Helper to get token from localStorage
   const getToken = () => {

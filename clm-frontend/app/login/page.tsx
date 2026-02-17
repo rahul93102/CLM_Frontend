@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [localError, setLocalError] = useState('')
   const [rememberMe, setRememberMe] = useState(false)
+  const [googleBusy, setGoogleBusy] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -169,15 +170,27 @@ export default function LoginPage() {
         <div className="mt-4 flex justify-center">
           <GoogleSignInButton
             clientId={googleClientId}
-            disabled={isLoading}
+            disabled={isLoading || googleBusy}
             onCredential={async (credential) => {
               setLocalError('')
-              await loginWithGoogle(credential)
-              router.replace('/dashboard')
+              setGoogleBusy(true)
+              try {
+                await loginWithGoogle(credential)
+                router.replace('/dashboard')
+              } finally {
+                setGoogleBusy(false)
+              }
             }}
             onError={(msg) => setLocalError(msg)}
           />
         </div>
+
+        {googleBusy && (
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
+            <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
+            Authenticating with Google…
+          </div>
+        )}
       </div>
     </AuthCardShell>
   )
