@@ -1265,12 +1265,17 @@ export class ApiClient {
     })
   }
 
-  async inhouseSignerSign(token: string, signature_data_url: string, deviceId?: string): Promise<ApiResponse<any>> {
+  async inhouseSignerSign(
+    token: string,
+    signature_data_url: string,
+    deviceId?: string,
+    placement?: { recipient_index?: number; page_number: number; position: { x: number; y: number; width: number; height: number } }
+  ): Promise<ApiResponse<any>> {
     const headers = deviceId ? { 'X-Device-Id': deviceId } : undefined
     return this.request(
       'POST',
       `${ApiClient.API_V1_PREFIX}/inhouse/esign/sign/${token}/`,
-      { signature_data_url },
+      placement ? { signature_data_url, placement } : { signature_data_url },
       headers,
       true,
       { auth: false }

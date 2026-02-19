@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { ApiClient } from '@/app/lib/api-client';
 import { API_BASE_URL } from '@/app/lib/env';
 import SignatureModal from '@/app/components/SignatureModal';
+import SignatureFieldPlacer, { type SignatureFieldPlacement } from '@/app/components/SignatureFieldPlacer';
 
 function getOrCreateDeviceId(): string {
   if (typeof window === 'undefined') return '';
@@ -28,9 +29,11 @@ export default function InhouseSignClient() {
   const [session, setSession] = useState<any | null>(null);
 
   const [sigOpen, setSigOpen] = useState(false);
+  const [placeOpen, setPlaceOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [signed, setSigned] = useState(false);
   const [pdfRev, setPdfRev] = useState(0);
+  const [placement, setPlacement] = useState<SignatureFieldPlacement | null>(null);
 
   const deviceId = useMemo(() => getOrCreateDeviceId(), []);
 
@@ -62,6 +65,9 @@ export default function InhouseSignClient() {
       const data = res.data as any;
       setSession(data);
       setSigned(String(data?.signer?.status || '').toLowerCase() === 'signed');
+      if (data?.placement && typeof data.placement === 'object') {
+        setPlacement(data.placement as SignatureFieldPlacement);
+      }
       setPdfRev((v) => v + 1);
     } finally {
       setLoading(false);
@@ -79,7 +85,7 @@ export default function InhouseSignClient() {
       setSubmitting(true);
       setError(null);
       const client = new ApiClient();
-      const res = await client.inhouseSignerSign(token, dataUrl, deviceId);
+      const res = await client.inhouseSignerSign(token, dataUrl, deviceId, placement || undefined);
       if (!res.success) {
         setError(res.error || 'Failed to sign');
         return;
@@ -138,6 +144,15 @@ export default function InhouseSignClient() {
 
             <button
               type="button"
+              onClick={() => setPlaceOpen(true)}
+              disabled={submitting || loading || !token || !pdfSrc}
+              className="mt-3 w-full h-10 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+            >
+              Choose signature position
+            </button>
+
+            <button
+              type="button"
               onClick={() => setSigOpen(true)}
               disabled={submitting || loading || !token}
               className="mt-4 w-full h-10 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
@@ -159,6 +174,25 @@ export default function InhouseSignClient() {
           onApply={(payload) => void doSign(payload.dataUrl)}
           initialName={signerName}
           storageKey="clm:inhouseSigner:signatureModal:v1"
+        />
+
+        <SignatureFieldPlacer
+          open={placeOpen}
+          pdfUrl={pdfSrc}
+          signers={[
+            {
+              name: String(session?.signer?.name || session?.signer?.email || 'Signer'),
+              email: String(session?.signer?.email || ''),
+              recipient_index: Number(session?.signer?.recipient_index ?? 0),
+            },
+          ]}
+          initialPlacements={placement ? [placement] : undefined}
+          onCancel={() => setPlaceOpen(false)}
+          onSave={async (placements) => {
+            const first = Array.isArray(placements) ? placements[0] : null;
+            if (first) setPlacement(first);
+            setPlaceOpen(false);
+          }}
         />
       </div>
     </div>

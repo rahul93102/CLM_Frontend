@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Rnd } from 'react-rnd';
 
-export type PlacerSigner = { name: string; email: string };
+export type PlacerSigner = { name: string; email: string; recipient_index?: number };
 
 export type SignatureFieldPlacement = {
   recipient_index: number;
@@ -41,7 +41,7 @@ function defaultPlacementsForSigners(signers: PlacerSigner[]): SignatureFieldPla
   const height = 8;
   const spacing = 12;
   return signers.map((_, i) => ({
-    recipient_index: i,
+    recipient_index: typeof signers[i]?.recipient_index === 'number' ? Number(signers[i]!.recipient_index) : i,
     page_number: 1,
     position: {
       x: baseX,
@@ -102,7 +102,8 @@ export default function SignatureFieldPlacer({
   useEffect(() => {
     if (!open) return;
 
-    const base = Array.isArray(initialPlacements) && initialPlacements.length > 0 ? initialPlacements : defaultPlacementsForSigners(signers);
+    const defaults = defaultPlacementsForSigners(signers);
+    const base = Array.isArray(initialPlacements) && initialPlacements.length > 0 ? initialPlacements : defaults;
     const byRecipient = new Map<number, SignatureFieldPlacement>();
     for (const p of base) {
       if (typeof p?.recipient_index === 'number') byRecipient.set(p.recipient_index, normalizePlacement(p));
@@ -110,12 +111,13 @@ export default function SignatureFieldPlacer({
 
     const merged: SignatureFieldPlacement[] = [];
     for (let i = 0; i < signers.length; i++) {
+      const recipientIndex = defaults[i]?.recipient_index ?? i;
       merged.push(
         normalizePlacement(
-          byRecipient.get(i) || {
-            recipient_index: i,
+          byRecipient.get(recipientIndex) || {
+            recipient_index: recipientIndex,
             page_number: 1,
-            position: defaultPlacementsForSigners([signers[i]])[0].position,
+            position: defaults[i]!.position,
           }
         )
       );
