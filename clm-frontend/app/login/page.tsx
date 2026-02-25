@@ -54,10 +54,10 @@ export default function LoginPage() {
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
 
   return (
-    <AuthCardShell title="Welcome Back" subtitle="Access your private vault securely" activeTab="login">
+    <AuthCardShell title="Welcome back" subtitle="Sign in to your workspace" activeTab="login">
       {displayError && (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-700">{displayError}</p>
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+          <p className="text-sm font-semibold text-rose-800">{displayError}</p>
         </div>
       )}
 
@@ -89,9 +89,11 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@company.com"
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-10 py-3 text-sm text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#ff6f8a]"
+              className="w-full rounded-xl border border-black/15 bg-white px-10 py-3 text-sm font-semibold text-black placeholder:text-black/35 outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-300"
               disabled={isLoading}
               autoComplete="email"
+              inputMode="email"
+              autoCapitalize="none"
             />
           </div>
         </div>
@@ -101,7 +103,7 @@ export default function LoginPage() {
             <label htmlFor="password" className="block text-xs font-semibold text-gray-700">
               Password
             </label>
-            <Link href="/forgot-password" className="text-xs font-semibold text-[#ff5aa0] hover:underline">
+            <Link href="/forgot-password" className="text-xs font-bold text-blue-700 hover:underline">
               Forgot?
             </Link>
           </div>
@@ -127,7 +129,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-10 py-3 text-sm text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#ff6f8a]"
+              className="w-full rounded-xl border border-black/15 bg-white px-10 py-3 text-sm font-semibold text-black placeholder:text-black/35 outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-300"
               disabled={isLoading}
               autoComplete="current-password"
             />
@@ -148,17 +150,17 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={isLoading}
-          className="mt-1 w-full rounded-xl bg-gradient-to-r from-[#ff8a7a] via-[#ff6f8a] to-[#ff5aa0] py-3.5 text-sm font-semibold text-white shadow-[0_12px_25px_-12px_rgba(255,90,160,0.6)] hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="mt-1 w-full rounded-xl bg-black py-3.5 text-sm font-bold text-white shadow-[0_18px_40px_-24px_rgba(0,0,0,0.55)] hover:bg-black/90 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {isLoading ? 'Signing in...' : 'Sign in to Vault →'}
+          {isLoading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
 
       <div className="mt-6">
         <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-gray-100" />
-          <div className="text-[10px] font-semibold tracking-widest text-gray-300">OR CONTINUE WITH</div>
-          <div className="h-px flex-1 bg-gray-100" />
+          <div className="h-px flex-1 bg-black/10" />
+          <div className="text-[10px] font-black tracking-widest text-black/35">OR CONTINUE WITH</div>
+          <div className="h-px flex-1 bg-black/10" />
         </div>
 
         {!googleClientId ? (
